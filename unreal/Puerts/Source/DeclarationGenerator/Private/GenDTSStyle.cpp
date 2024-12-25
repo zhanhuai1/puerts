@@ -52,7 +52,14 @@ TSharedRef<FSlateStyleSet> FGenDTSStyle::Create()
     Style->SetContentRoot(IPluginManager::Get().FindPlugin("Puerts")->GetBaseDir() / TEXT("Resources"));
 
     Style->Set("GenDTS.PluginAction", new IMAGE_BRUSH(TEXT("ButtonIcon_40x"), Icon40x40));
-
+    Style->Set("CompileTs.CompileTs", new IMAGE_BRUSH(TEXT("Doge_40x"), Icon40x40));
+	Style->Set("CharacterEditor.TsCharacterEditorCommandInfo", new IMAGE_BRUSH(TEXT("jue_40x40"), Icon40x40));
+	Style->Set("DataEditor.TsDataEditorCommandInfo", new IMAGE_BRUSH(TEXT("shuju_40x40"), Icon40x40));
+	Style->Set("MotionAssetEditor.TsMotionEditorCommandInfo", new IMAGE_BRUSH(TEXT("dongzuo_40x40"), Icon40x40));
+	Style->Set("EntryMain.TsEntryMainCommandInfo", new IMAGE_BRUSH(TEXT("qidong130x130"), Icon40x40));
+	Style->Set("ProjectileEditor.TsProjectileEditorCommandInfo", new IMAGE_BRUSH(TEXT("yuanjian_40x40"), Icon40x40));
+	Style->Set("JYLevelEditor.TsJYLevelEditorCommandInfo", new IMAGE_BRUSH(TEXT("guanqia_40x40"), Icon40x40));
+	Style->Set("GenerateTsTask.TsGenerateTsTask", new IMAGE_BRUSH(TEXT("task"), Icon40x40));
     return Style;
 }
 

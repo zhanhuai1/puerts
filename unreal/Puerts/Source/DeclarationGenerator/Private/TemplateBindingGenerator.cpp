@@ -4,6 +4,7 @@
 #include "JSClassRegister.h"
 #include "Interfaces/IPluginManager.h"
 #include "CoreUObject.h"
+#include "PathsUtils.h"
 #ifdef PUERTS_WITH_SOURCE_CONTROL
 #include "FileSystemOperation.h"
 #endif
@@ -198,7 +199,7 @@ void UTemplateBindingGenerator::Gen_Implementation() const
 
     Gen.End();
 
-    const FString FilePath = FPaths::ProjectDir() / TEXT("Typing/cpp/index.d.ts");
+    const FString FilePath = FPathsUtils::PuertsTypingDir() / TEXT("cpp/index.d.ts");
 
 #ifdef PUERTS_WITH_SOURCE_CONTROL
     PuertsSourceControlUtils::MakeSourceControlFileWritable(FilePath);

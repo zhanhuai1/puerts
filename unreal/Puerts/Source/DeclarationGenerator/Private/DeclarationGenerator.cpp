@@ -20,6 +20,7 @@
 #else
 #include "AssetRegistryModule.h"
 #endif
+#include "GameFramework/CheatManager.h"
 #endif
 #include "LevelEditor.h"
 #include "GenDTSStyle.h"
@@ -42,7 +43,21 @@
 #ifdef PUERTS_WITH_SOURCE_CONTROL
 #include "FileSystemOperation.h"
 #endif
+#include "CharacterEditorCommands.h"
+#include "CompileTsCommands.h"
+#include "DataEditorCommands.h"
+#include "EditorUtilitySubsystem.h"
+#include "EditorUtilityWidgetBlueprint.h"
+#include "EntryMainCommands.h"
+#include "JsMixinInterface.h"
+#include "MotionAssetEditorCommands.h"
 #include "PathEscape.h"
+#include "ProjectileEditorCommands.h"
+#include "JYLevelEditorCommands.h"
+#include "PathsUtils.h"
+#include "PuertsSetting.h"
+#include "TsTaskEditorCommands.h"
+#include "Kismet/KismetSystemLibrary.h"
 
 #define STRINGIZE(x) #x
 #define STRINGIZE_VALUE_OF(x) STRINGIZE(x)
@@ -370,8 +385,27 @@ void FTypeScriptDeclarationGenerator::GenTypeScriptDeclaration(bool InGenStruct,
         Gen(Class);
     }
     BeginGenAssetData = true;
+	const UPuertsSetting& Settings = *GetDefault<UPuertsSetting>();
+	const TArray<FString>& BlackNameList = Settings.IgnoreBlueprintPathOnDTS;
+	auto CheckIsBlackPath = [&BlackNameList](const FString& InPath){
+		for(const FString& BlackName:BlackNameList)
+		{
+			if(InPath.StartsWith(BlackName))
+			{
+				UE_LOG(LogTemp, Log, TEXT("======Ignore gen blueprint:%s   BlackName:%s"), *InPath, *BlackName);
+				return true;
+			}
+		}
+		return false;
+	};
     for (FAssetData const& AssetData : AssetList)
     {
+    	UE_LOG(LogTemp, Log, TEXT("======Try gen blueprint:%s"), *AssetData.PackagePath.ToString());
+    	if(CheckIsBlackPath(AssetData.PackagePath.ToString()))
+    	{
+    		continue;
+    	}
+
         auto BlueprintTypeDeclInfoPtr = BlueprintTypeDeclInfoCache.Find(AssetData.PackageName);
         if (BlueprintTypeDeclInfoPtr && BlueprintTypeDeclInfoPtr->Changed)
         {
@@ -401,12 +435,12 @@ void FTypeScriptDeclarationGenerator::GenTypeScriptDeclaration(bool InGenStruct,
     End();
 
     IPlatformFile& PlatformFile = FPlatformFileManager::Get().GetPlatformFile();
-    PlatformFile.CopyDirectoryTree(*(FPaths::ProjectDir() / TEXT("Typing")),
+    PlatformFile.CopyDirectoryTree(*FPathsUtils::PuertsTypingDir(),
         *(IPluginManager::Get().FindPlugin("Puerts")->GetBaseDir() / TEXT("Typing")), false);
-    PlatformFile.CopyDirectoryTree(*(FPaths::ProjectContentDir() / TEXT("JavaScript")),
+    PlatformFile.CopyDirectoryTree(*FPathsUtils::PuertsJavaScriptDir(),
         *(IPluginManager::Get().FindPlugin("Puerts")->GetBaseDir() / TEXT("Content") / TEXT("JavaScript")), true);
 
-    const FString UEDeclarationFilePath = FPaths::ProjectDir() / TEXT("Typing/ue/ue.d.ts");
+    const FString UEDeclarationFilePath = FPathsUtils::PuertsTypingDir() / TEXT("ue/ue.d.ts");
 
 #ifdef PUERTS_WITH_SOURCE_CONTROL
     PuertsSourceControlUtils::MakeSourceControlFileWritable(UEDeclarationFilePath);
@@ -429,14 +463,51 @@ void FTypeScriptDeclarationGenerator::GenTypeScriptDeclaration(bool InGenStruct,
     }
     End();
 
-    const FString BPDeclarationFilePath = FPaths::ProjectDir() / TEXT("Typing/ue/ue_bp.d.ts");
+    const FString BPDeclarationFilePath = FPathsUtils::PuertsTypingDir() / TEXT("ue/ue_bp.d.ts");
 
 #ifdef PUERTS_WITH_SOURCE_CONTROL
     PuertsSourceControlUtils::MakeSourceControlFileWritable(BPDeclarationFilePath);
 #endif
 
     FFileHelper::SaveStringToFile(ToString(), *BPDeclarationFilePath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+
+	// 读取ablSetting配置
+	TArray<FString> AbleSettingContent;
+	const FString AbleSettingSourceFilePath = FPaths::Combine(FPaths::ProjectPluginsDir(), TEXT("Able/Source/AbleCore/Classes"), TEXT("ablSettings.h"));
+    if (FFileHelper::LoadFileToStringArray(AbleSettingContent, *AbleSettingSourceFilePath))
+    {
+    	Begin();
+    	// 解析写入.d.ts文件
+	    for (int i = 0; i < AbleSettingContent.Num(); ++i)
+	    {
+		    if (AbleSettingContent[i].Find(TEXT("#define")) != INDEX_NONE)
+		    {
+		    	TArray<FString> ContentArray;
+		    	AbleSettingContent[i].ParseIntoArray(ContentArray, TEXT(" "));
+		    	
+			    if (AbleSettingContent.Num() < 3)
+			    {
+			    	// 不合规
+				    continue;
+			    }
+		    	
+		    	const FString AttributeName = ContentArray[1];
+		    	const FString AttributeValue = ContentArray[2].Replace(TEXT("TEXT("), TEXT("")).Replace(TEXT(")"), TEXT(""));
+		    	// 这里可以优化下，加代码注释
+		    	Output << "\t" << "const " << AttributeName << " = " << AttributeValue << "\n";
+		    	// UE_LOG(LogTemp, Error, TEXT("[DeclarationGenerator::GenTypeScriptDeclaration]:const %s = %s"), *AttributeName, *AttributeValue);
+		    }
+	    }
+    	End();
+    	const FString AbleSetting = FPathsUtils::PuertsTypingDir() / TEXT("ue/ue_ableSetting.d.ts");
+    	FFileHelper::SaveStringToFile(ToString(), *AbleSetting, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+    }
+    else
+    {
+	    UE_LOG(LogTemp, Error, TEXT("[DeclarationGenerator::GenTypeScriptDeclaration]:没有读取到源文件：%s"), *AbleSettingSourceFilePath);
+    }
 }
+
 
 static UPackage* GetPackage(UObject* Obj)
 {
@@ -518,6 +589,11 @@ void FTypeScriptDeclarationGenerator::WriteOutput(UObject* Obj, const FStringBuf
         NamespaceBegin(Obj, Temp);
         Temp << Buff;
         NamespaceEnd(Obj, Temp);
+    	
+    	if(Pkg->GetFName().ToString().Contains(TEXT("BS_FluxBuoyancyPontoon")))
+    	{
+    		UE_LOG(LogTemp, Log, TEXT("======BS_FluxBuoyancyPontoon LoadAllWidgetBlueprint:"));
+    	}
         BlueprintTypeDeclInfoCache[Pkg->GetFName()].NameToDecl.Add(Obj->GetFName(), Temp.Buffer);
         BlueprintTypeDeclInfoCache[Pkg->GetFName()].IsExist = true;
     }
@@ -532,7 +608,7 @@ void FTypeScriptDeclarationGenerator::WriteOutput(UObject* Obj, const FStringBuf
 void FTypeScriptDeclarationGenerator::RestoreBlueprintTypeDeclInfos(bool InGenFull)
 {
     FString FileContent;
-    FFileHelper::LoadFileToString(FileContent, *(FPaths::ProjectDir() / TEXT("Typing/ue/ue_bp.d.ts")));
+    FFileHelper::LoadFileToString(FileContent, *(FPathsUtils::PuertsTypingDir() / TEXT("ue/ue_bp.d.ts")));
     RestoreBlueprintTypeDeclInfos(FileContent, InGenFull);
 }
 
@@ -579,6 +655,10 @@ void FTypeScriptDeclarationGenerator::RestoreBlueprintTypeDeclInfos(const FStrin
                         }
                         else
                         {
+                        	if(PackageName.Contains(TEXT("BS_FluxBuoyancyPontoon")))
+                        	{
+                        		UE_LOG(LogTemp, Log, TEXT("======BS_FluxBuoyancyPontoon LoadAllWidgetBlueprint:"));
+                        	}
                             TMap<FName, FString> NameToDecl;
                             NameToDecl.Add(TypeName, TypeDecl);
                             bool bIsExist = InGenFull ? false : bIsAssociation;
@@ -597,11 +677,21 @@ void FTypeScriptDeclarationGenerator::LoadAllWidgetBlueprint(FName InSearchPath,
 {
     FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(FName("AssetRegistry"));
     IAssetRegistry& AssetRegistry = AssetRegistryModule.Get();
+	AssetRegistry.SearchAllAssets(true);
 
     FName PackagePath = (InSearchPath == NAME_None) ? FName(TEXT("/Game")) : InSearchPath;
-
+	// UE_LOG(LogTemp, Log, TEXT("UJyExportJsCommandlet FTypeScriptDeclarationGenerator LoadAllWidgetBlueprint.PackagePath.%s"),*PackagePath.ToString());
     FARFilter BPFilter;
     BPFilter.PackagePaths.Add(PackagePath);
+    if (InSearchPath == NAME_None)
+    {
+		// TODO waynnewu 改为配置
+    	TArray<FString> Paths;
+        BPFilter.PackagePaths.Add(FName(TEXT("/Able")));
+    	Paths.Add(TEXT("/Able"));
+    	AssetRegistry.ScanPathsSynchronous(Paths);
+        BPFilter.PackagePaths.Add(FName(TEXT("/ActCore")));
+    }
     BPFilter.bRecursivePaths = true;
     BPFilter.bRecursiveClasses = true;
 #if ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION > 0
@@ -638,6 +728,10 @@ void FTypeScriptDeclarationGenerator::LoadAllWidgetBlueprint(FName InSearchPath,
         }
         else
         {
+        	if(AssetData.PackageName.ToString().Contains(TEXT("BS_FluxBuoyancyPontoon")))
+        	{
+        		UE_LOG(LogTemp, Log, TEXT("======BS_FluxBuoyancyPontoon LoadAllWidgetBlueprint:"));
+        	}
             BlueprintTypeDeclInfoCache.Add(AssetData.PackageName,
                 {TMap<FName, FString>(), PackageData ? PackageData->PackageGuid.ToString() : FString(TEXT("")), true, true, false});
         }
@@ -675,6 +769,10 @@ void FTypeScriptDeclarationGenerator::Gen(UObject* ToGen)
         BlueprintTypeDeclInfo* BlueprintTypeDeclInfo = BlueprintTypeDeclInfoCache.Find(Package->GetFName());
         if (!BlueprintTypeDeclInfo)
         {
+        	if(Package->GetFName().ToString().Contains(TEXT("BS_FluxBuoyancyPontoon")))
+        	{
+        		UE_LOG(LogTemp, Log, TEXT("======BS_FluxBuoyancyPontoon LoadAllWidgetBlueprint:"));
+        	}
             BlueprintTypeDeclInfoCache.Add(Package->GetFName(), {TMap<FName, FString>(), FString(TEXT("")), true, false, true});
         }
     }
@@ -882,6 +980,23 @@ bool FTypeScriptDeclarationGenerator::GenTypeDecl(FStringBuffer& StringBuffer, P
     return true;
 }
 
+void AddFunctionDesc(FStringBuffer& InOutStringBuffer, UFunction* Function)
+{
+	if(!Function)
+		return;
+
+	if(Function->FunctionFlags & FUNC_Protected)
+	{
+		InOutStringBuffer << "protected ";
+	}else if(Function->FunctionFlags & FUNC_Private)
+	{
+		InOutStringBuffer << "private ";
+	}else
+	{
+		InOutStringBuffer << "public ";
+	}
+}
+
 // #lizard forgives
 bool FTypeScriptDeclarationGenerator::GenFunction(
     FStringBuffer& OwnerBuffer, UFunction* Function, bool WithName, bool ForceOneway, bool IgnoreOut, bool IsExtensionMethod)
@@ -889,6 +1004,8 @@ bool FTypeScriptDeclarationGenerator::GenFunction(
     // FStringBuffer LocalBuffer;
     if (WithName)
     {
+    	AddFunctionDesc(OwnerBuffer,Function);
+    	
         if (!IsExtensionMethod && (Function->FunctionFlags & FUNC_Static))
         {
             OwnerBuffer << "static ";
@@ -1187,6 +1304,46 @@ static uint32_t GetSameNameSuperCount(UStruct* InStruct)
     return SameNameParentCount;
 }
 
+
+void AddAccessDesc(FStringBuffer& InOutTmpBuff, const FProperty* InProperty)
+{
+	if(!InProperty)
+		return;
+	if(InProperty->PropertyFlags & CPF_NativeAccessSpecifierPrivate)
+	{
+		//TODO.特殊暂时过滤StaticSwitchParameters_DEPRECATED 过时的属性子类Private，父类public,解析出的变量名同名,导致ts权限出错
+		if(InProperty->NamePrivate == TEXT("StaticSwitchParameters"))
+		{
+			return;
+		}
+		InOutTmpBuff << "private ";	
+	}
+	else if(InProperty->PropertyFlags & CPF_NativeAccessSpecifierProtected)
+	{
+		InOutTmpBuff << "protected ";
+	}
+    else
+	{
+        // PuerTS 导出UMG蓝图的ui属性的时候，从public改成protected
+        if (const auto OwnerClass = InProperty->GetOwnerClass())
+        {
+            if (OwnerClass->IsChildOf(UUserWidget::StaticClass()) && OwnerClass->ImplementsInterface(UJsMixinInterface::StaticClass()))
+            {
+                if (const FObjectProperty* ObjectProperty = CastField<FObjectProperty>(InProperty))
+                {
+                    const UClass* PropertyClass = ObjectProperty->PropertyClass;
+                    if (PropertyClass && PropertyClass->IsChildOf(UWidget::StaticClass()))
+                    {
+                        InOutTmpBuff << "protected ";
+                        return;
+                    }
+                }
+            }
+        }
+		InOutTmpBuff << "public ";
+	}
+}
+
 void FTypeScriptDeclarationGenerator::GenClass(UClass* Class)
 {
     FStringBuffer StringBuffer{"", ""};
@@ -1219,6 +1376,7 @@ void FTypeScriptDeclarationGenerator::GenClass(UClass* Class)
         AddedProperties.Add(Property->GetName());
 
         FStringBuffer TmpBuff;
+    	AddAccessDesc(TmpBuff,Property);
         TmpBuff << SafeFieldName(Property->GetName()) << ": ";
         TArray<UObject*> RefTypesTmp;
         if (!GenTypeDecl(TmpBuff, Property, RefTypesTmp))
@@ -1242,6 +1400,21 @@ void FTypeScriptDeclarationGenerator::GenClass(UClass* Class)
         }
         TryToAddOverload(Outputs, FunctionIt->GetName(), (FunctionIt->FunctionFlags & FUNC_Static) != 0, TmpBuff.Buffer);
     }
+	for(const FImplementedInterface& TmpInterface:Class->Interfaces)
+	{
+		if(TmpInterface.Class != nullptr)
+		{
+			for (TFieldIterator<UFunction> FunctionIt(TmpInterface.Class, EFieldIteratorFlags::ExcludeSuper); FunctionIt; ++FunctionIt)
+			{
+				FStringBuffer TmpBuff;
+				if (!GenFunction(TmpBuff, *FunctionIt))
+				{
+					continue;
+				}
+				TryToAddOverload(Outputs, FunctionIt->GetName(), (FunctionIt->FunctionFlags & FUNC_Static) != 0, TmpBuff.Buffer);
+			}
+		}
+	}
 
     GatherExtensions(Class, StringBuffer);
 
@@ -1403,6 +1576,7 @@ void FTypeScriptDeclarationGenerator::GenStruct(UStruct* Struct)
     {
         auto Property = *PropertyIt;
         FStringBuffer TmpBuff;
+    	AddAccessDesc(TmpBuff,Property);
         FString SN = SafeFieldName(Struct->IsA<UUserDefinedStruct>() ?
 #if ENGINE_MINOR_VERSION >= 23 || ENGINE_MAJOR_VERSION > 4
                                                                      Property->GetAuthoredName()
@@ -1455,10 +1629,27 @@ class FToolBarBuilder;
 
 #define LOCTEXT_NAMESPACE "FGenDTSModule"
 
+class FUICommandList;
+
 class FDeclarationGenerator : public IDeclarationGenerator
 {
+public:
+	virtual void FDeclarationGenerator::CommandGenUeDts(bool InGenFull, FName InSearchPath) override
+	{
+        GenUeDts(InGenFull,InSearchPath);
+    }
 private:
-    TSharedPtr<class FUICommandList> PluginCommands;
+    TSharedPtr<FUICommandList> PluginCommands;
+    TSharedPtr<FUICommandList> CompileCommands;
+	TSharedPtr<FUICommandList> CharacterEditorCommands;
+	TSharedPtr<FUICommandList> DataEditorCommands;
+	TSharedPtr<FUICommandList> MotionAssetEditorCommands;
+	TSharedPtr<FUICommandList> EntryMainCommands;
+	TSharedPtr<FUICommandList> ProjectileEditorCommands;
+	TSharedPtr<FUICommandList> JYLevelEditorCommands;
+	TSharedPtr<FUICommandList> GenerateTsTaskCommands;
+	
+	
     TUniquePtr<FAutoConsoleCommand> ConsoleCommand;
 
 #if (ENGINE_MAJOR_VERSION >= 5)
@@ -1477,6 +1668,14 @@ private:
                 }
                 {
                     Section.AddMenuEntryWithCommandList(FGenDTSCommands::Get().PluginAction, PluginCommands);
+                    Section.AddMenuEntryWithCommandList(FCompileTsCommands::Get().CompileTs, CompileCommands);
+                	Section.AddMenuEntryWithCommandList(FCharacterEditorCommands::Get().TsCharacterEditorCommandInfo,CharacterEditorCommands);
+                	Section.AddMenuEntryWithCommandList(FDataEditorCommands::Get().TsDataEditorCommandInfo,DataEditorCommands);
+                	Section.AddMenuEntryWithCommandList(FMotionAssetEditorCommands::Get().TsMotionEditorCommandInfo,MotionAssetEditorCommands);
+                	Section.AddMenuEntryWithCommandList(FEntryMainCommands::Get().TsEntryMainCommandInfo,EntryMainCommands);
+                	Section.AddMenuEntryWithCommandList(FProjectileEditorCommands::Get().TsProjectileEditorCommandInfo,ProjectileEditorCommands);
+                	Section.AddMenuEntryWithCommandList(FJYLevelEditorCommands::Get().TsJYLevelEditorCommandInfo,JYLevelEditorCommands);
+                	Section.AddMenuEntryWithCommandList(FTsTaskEditorCommands::Get().TsGenerateTsTask,GenerateTsTaskCommands);
                 }
             }
         }
@@ -1493,6 +1692,31 @@ private:
                     FToolMenuEntry& Entry =
                         Section.AddEntry(FToolMenuEntry::InitToolBarButton(FGenDTSCommands::Get().PluginAction));
                     Entry.SetCommandList(PluginCommands);
+                    FToolMenuEntry& Entry2 =
+                        Section.AddEntry(FToolMenuEntry::InitToolBarButton(FCompileTsCommands::Get().CompileTs));
+                    Entry2.SetCommandList(CompileCommands);
+
+                	FToolMenuEntry& Entry3 =
+						Section.AddEntry(FToolMenuEntry::InitToolBarButton(FCharacterEditorCommands::Get().TsCharacterEditorCommandInfo));
+                	Entry3.SetCommandList(CharacterEditorCommands);
+                	FToolMenuEntry& Entry4 =
+						Section.AddEntry(FToolMenuEntry::InitToolBarButton(FDataEditorCommands::Get().TsDataEditorCommandInfo));
+                	Entry4.SetCommandList(DataEditorCommands);
+                	FToolMenuEntry& Entry5 =
+						Section.AddEntry(FToolMenuEntry::InitToolBarButton(FMotionAssetEditorCommands::Get().TsMotionEditorCommandInfo));
+                	Entry5.SetCommandList(MotionAssetEditorCommands);
+                	FToolMenuEntry& Entry6 =
+						Section.AddEntry(FToolMenuEntry::InitToolBarButton(FEntryMainCommands::Get().TsEntryMainCommandInfo));
+                	Entry6.SetCommandList(EntryMainCommands);
+                	FToolMenuEntry& Entry7 =
+						Section.AddEntry(FToolMenuEntry::InitToolBarButton(FProjectileEditorCommands::Get().TsProjectileEditorCommandInfo));
+                	Entry7.SetCommandList(ProjectileEditorCommands);
+                	FToolMenuEntry& Entry8 =
+						Section.AddEntry(FToolMenuEntry::InitToolBarButton(FJYLevelEditorCommands::Get().TsJYLevelEditorCommandInfo));
+                	Entry8.SetCommandList(JYLevelEditorCommands);                	
+                	FToolMenuEntry& Entry9 =
+						Section.AddEntry(FToolMenuEntry::InitToolBarButton(FTsTaskEditorCommands::Get().TsGenerateTsTask));
+                	Entry9.SetCommandList(GenerateTsTaskCommands);
                 }
             }
         }
@@ -1523,6 +1747,8 @@ private:
         FString DialogMessage = FString::Printf(TEXT("genertate finish, %s store in %s, ([PATH=%s])"), TEXT("ue.d.ts"),
             TEXT("Content/Typing/ue"), *PackagePath.ToString());
 
+        UE_LOG(LogTemp, Display, TEXT("%s"), *DialogMessage);
+
         FText DialogText = FText::Format(LOCTEXT("PluginButtonDialogText", "{0}"), FText::FromString(DialogMessage));
         // FMessageDialog::Open(EAppMsgType::Ok, DialogText);
         FNotificationInfo Info(DialogText);
@@ -1530,11 +1756,220 @@ private:
         Info.FadeInDuration = 0.0f;
         Info.FadeOutDuration = 5.0f;
         FSlateNotificationManager::Get().AddNotification(Info);
-    }
 
+        GenTypeScriptGMCommands();
+        GenGMPTag();
+    }
+    void GenTypeScriptGMCommands()
+    {
+#if WITH_EDITOR
+        TMap<FName, FString> CommandNames;
+        TArray<UClass*> Subclasses;
+        Subclasses.Reset();
+        GetDerivedClasses(UCheatManagerExtension::StaticClass(), Subclasses);
+        for (const UClass* Subclass : Subclasses)
+        {
+            TArray < FName > ClassCommandNames;
+            Subclass->GenerateFunctionList(ClassCommandNames);
+            for (const FName ClassCommandName : ClassCommandNames)
+            {
+                const auto Func = Subclass->FindFunctionByName(ClassCommandName);
+                FString Desc;
+			
+                auto Property = Func->ChildProperties;
+                while (Property)
+                {
+                    Desc += FString::Printf(TEXT(" %s[%s]"), *Property->GetName(), *Property->GetClass()->GetName());
+                    Property = Property->Next;
+                }
+                CommandNames.Add(ClassCommandName, Desc);
+            } 
+        }
+        FStringBuffer Content;
+        Content << "let CppCommands: Map<string,string>;\n";
+        Content << "CppCommands = new Map<string,string>([\n";
+        for (const auto CommandName : CommandNames)
+        {
+            Content << FString::Printf(TEXT("    [\"%s\", \"%s\"],\n"), *CommandName.Key.ToString(), *CommandName.Value.TrimStartAndEnd());
+        }
+        Content << "]);\nexport { CppCommands };";
+        const FString CommandFilePath = FPathsUtils::PuertsTypeScriptDir() / TEXT("Modules/GM/CppCommands.ts");
+        FFileHelper::SaveStringToFile(Content.Buffer, *CommandFilePath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+#endif
+    }
     void GenUeDtsCallback()
     {
         GenUeDts(false, NAME_None);
+    }
+
+	/** GMPTag刷新Index.d.ts */
+	void GenGMPTag()
+    {
+	    //INI
+    	const FString INIFilePath = FPaths::Combine(FPaths::ProjectConfigDir(), TEXT("DefaultGMPMeta.ini"));
+    	const FString IndexFilePath = FPaths::Combine(FPathsUtils::PuertsTypeScriptDir(), TEXT("Utils/GMPMsgKey.ts"));
+    
+    	//INI文件内容
+    	TArray<FString> TempContents;
+    	//修改后需要保存的内容
+    	TArray<FString> FixedContents;
+    	TSet<FString> MsgKeys;
+    	//UpdateContents.Add("\t}");
+    	FixedContents.Add("export enum GMPMsgKey");
+    	FixedContents.Add("{");
+    	if (FFileHelper::LoadFileToStringArray(TempContents, *INIFilePath))
+    	{
+    		//解析INIT内容,解析为String
+    		for (auto LineContent : TempContents)
+    		{
+    			if (LineContent.Find("MessageTagsList") != INDEX_NONE && LineContent.Find("Tag=") != INDEX_NONE)
+    			{
+    				//拆解
+    				FString LineContentTemp = LineContent.Replace(TEXT("+MessageTagsList=("), TEXT("")).Replace(TEXT("Tag=\""), TEXT(""));
+    				TArray<FString> Array;
+    				LineContentTemp.ParseIntoArray(Array, TEXT(",") , true);
+				
+    				FString TagValue =  Array[0].Replace(TEXT("Tag="), TEXT("")).Replace(TEXT("\""), TEXT(""));
+    				FString TagName = TagValue.Replace(TEXT("."), TEXT("_"));
+    				if(!MsgKeys.Contains(TagName))
+    				{
+    					MsgKeys.Add(TagName);
+    					FString Annotation = "//";
+    					FString IndexLineContent;
+    					for (int i = 1; i < Array.Num(); ++i)
+    					{
+    						Annotation += Array[i];
+    					}
+
+    					IndexLineContent = "\t"+TagName + " = \"" + TagValue +"\"," +Annotation;
+    					FixedContents.Add(IndexLineContent);
+    				}
+    			}
+    		}
+    		
+    	}
+    	else
+    	{
+    		UE_LOG(LogTemp, Error, TEXT("没有找到 Config/DefaultGMPMeta.ini 文件，请检查资源是否存在。"));
+    	}
+        // JYGMPEvetnDefinition.h内的Event需要添加到NativeMessageTag.ini
+        /*
+    	const FString GMPDeclarationsPathInPlugin = TEXT("GMP/Source/GMP/Shared/JYGMPEvetnDefinition.h");
+    	const FString GMPDeclarationsPath = FPaths::Combine(FPaths::ProjectPluginsDir(), GMPDeclarationsPathInPlugin);
+    	TempContents.Empty();
+    	if (FFileHelper::LoadFileToStringArray(TempContents, *GMPDeclarationsPath))
+    	{
+    		for (auto LineContent : TempContents)
+    		{
+    			if (!LineContent.IsEmpty() && LineContent.Find("RegisterJYMessageSignature(") != INDEX_NONE)
+    			{
+    				FString LineContentTemp = LineContent.Replace(TEXT("RegisterJYMessageSignature("), TEXT("")).Replace(TEXT(")"), TEXT(""));
+    				FString Code,Comment;
+    				LineContentTemp.Split(TEXT(";"), &Code, &Comment);
+    				//拆解
+    				if(Code.Contains(","))
+    				{
+    					FString LeftStr,RightStr;
+    					Code.Split(TEXT(","), &LeftStr, &RightStr);
+    					if(!MsgKeys.Contains(LeftStr))
+    					{
+    						MsgKeys.Add(LeftStr);
+    						FString Result = "\t" + LeftStr + " = \"" + LeftStr + "\"" + "," + "//Parameters=" + RightStr;
+    						FixedContents.Add(Result);
+    					}
+    				}
+    				else
+    				{
+    					if(!MsgKeys.Contains(Code))
+    					{
+    						MsgKeys.Add(Code);
+    						FString Result = "\t" + Code + " = \"" + Code + "\"" + "," + "//Parameters=None." + Comment;
+    						FixedContents.Add(Result);
+    					}
+    				}
+    			}
+    		}
+    	}
+    	else
+    	{
+    		UE_LOG(LogTemp, Error, TEXT("DeclarationGenerator GenGMPTag. 没有找到 GMP/Source/GMP/Shared/JYGMPDeclarations.h 文件，请检查资源是否存在。"));
+    	}
+        */
+    	FixedContents.Add("}");
+    	
+    	FFileHelper::SaveStringArrayToFile(FixedContents, *IndexFilePath, FFileHelper::EEncodingOptions::ForceUTF8);
+    }
+
+    void CompileTsCallback()
+    {
+        UWorld* World = GEditor ? GEditor->GetEditorWorldContext(false).World() : nullptr;
+        UKismetSystemLibrary::ExecuteConsoleCommand(World, FString::Printf(TEXT("Puerts compilediff true")));
+    }
+
+	void CharacterEditorStart()
+    {
+    	if(UEditorUtilitySubsystem* EditorUtilitySubsystem = GEditor->GetEditorSubsystem<UEditorUtilitySubsystem>()){
+    		UEditorUtilityWidgetBlueprint* EWP_EditorWidget = LoadObject<UEditorUtilityWidgetBlueprint>(NULL, TEXT("/Able/EditorWidget/CharacterEditor/CharacterEditor.CharacterEditor"), NULL, LOAD_None, NULL);
+    		// FName CharacterTabID = "CharacterEditor";
+    		//EditorUtilitySubsystem->SpawnAndRegisterTabAndGetID(EWP_EditorWidget,CharacterTabID);
+    		// IPuertsEditorModule::Get().GetEditorJSHelper()->SetCharacterEditorTabID(CharacterTabID);
+    		EditorUtilitySubsystem->SpawnAndRegisterTab(EWP_EditorWidget);
+    	}
+    }
+
+	void DataEditorStart()
+    {
+    	if(UEditorUtilitySubsystem* EditorUtilitySubsystem = GEditor->GetEditorSubsystem<UEditorUtilitySubsystem>()){
+    		UEditorUtilityWidgetBlueprint* EWP_EditorWidget = LoadObject<UEditorUtilityWidgetBlueprint>(NULL, TEXT("/Able/EditorWidget/DataEditor/DataEditorTableMain.DataEditorTableMain"), NULL, LOAD_None, NULL);
+    		//FName DataEditorTabID = "DataEditor";
+    		//EditorUtilitySubsystem->SpawnAndRegisterTabAndGetID(EWP_EditorWidget,DataEditorTabID);
+    		// IPuertsEditorModule::Get().GetEditorJSHelper()->SetDataEditorTabID(DataEditorTabID);
+    		EditorUtilitySubsystem->SpawnAndRegisterTab(EWP_EditorWidget);
+    	}
+    }
+
+	void MotionEditorStart()
+    {
+    	if(UEditorUtilitySubsystem* EditorUtilitySubsystem = GEditor->GetEditorSubsystem<UEditorUtilitySubsystem>()){
+    		UEditorUtilityWidgetBlueprint* EWP_EditorWidget = LoadObject<UEditorUtilityWidgetBlueprint>(NULL, TEXT("/Able/EditorWidget/SkillEditor/AbleTableViewerPanel.AbleTableViewerPanel"), NULL, LOAD_None, NULL);
+    		//FName MotionEditorTabID = "MotionEditor";
+    		//EditorUtilitySubsystem->SpawnAndRegisterTabWithId(EWP_EditorWidget,MotionEditorTabID);
+    		//IPuertsEditorModule::Get().GetEditorJSHelper()->SetMotionEditorTabID(MotionEditorTabID);
+    		EditorUtilitySubsystem->SpawnAndRegisterTab(EWP_EditorWidget);
+    	}
+    }
+	
+	void EntryMainStart()
+    {
+    	if(UEditorUtilitySubsystem* EditorUtilitySubsystem = GEditor->GetEditorSubsystem<UEditorUtilitySubsystem>())
+    	{
+    		UEditorUtilityWidgetBlueprint* EWP_EditorWidget = LoadObject<UEditorUtilityWidgetBlueprint>(NULL, TEXT("/Game/Jy/Core/EditorWidget/EntryMain.EntryMain"), NULL, LOAD_None, NULL);
+    		EditorUtilitySubsystem->SpawnAndRegisterTab(EWP_EditorWidget);
+    	}
+    }
+    	
+	void ProjectileEditorStart()
+	{
+    	if(UEditorUtilitySubsystem* EditorUtilitySubsystem = GEditor->GetEditorSubsystem<UEditorUtilitySubsystem>()){
+    		UEditorUtilityWidgetBlueprint* EWP_EditorWidget = LoadObject<UEditorUtilityWidgetBlueprint>(NULL, TEXT("/Able/EditorWidget/ProjectileEditor/ProjectileEditorMain.ProjectileEditorMain"), NULL, LOAD_None, NULL);
+    		EditorUtilitySubsystem->SpawnAndRegisterTab(EWP_EditorWidget);
+    	}
+	}
+
+	void JYLevelEditorStart()
+	{
+    	if(UEditorUtilitySubsystem* EditorUtilitySubsystem = GEditor->GetEditorSubsystem<UEditorUtilitySubsystem>()){
+    		UEditorUtilityWidgetBlueprint* EWP_EditorWidget = LoadObject<UEditorUtilityWidgetBlueprint>(NULL, TEXT("/Able/EditorWidget/LevelEditor/LevelEditorMain.LevelEditorMain"), NULL, LOAD_None, NULL);
+    		EditorUtilitySubsystem->SpawnAndRegisterTab(EWP_EditorWidget);
+    	}
+	}
+
+	void GenerateTsTaskStart()
+    {
+    	if(UEditorUtilitySubsystem* EditorUtilitySubsystem = GEditor->GetEditorSubsystem<UEditorUtilitySubsystem>()){
+    		UEditorUtilityWidgetBlueprint* EWP_EditorWidget = LoadObject<UEditorUtilityWidgetBlueprint>(NULL, TEXT("/Able/EditorWidget/TsTask/GenerateTsTask.GenerateTsTask"), NULL, LOAD_None, NULL);
+    		EditorUtilitySubsystem->SpawnAndRegisterTab(EWP_EditorWidget);
+    	} 
     }
 
 public:
@@ -1545,12 +1980,53 @@ public:
         FGenDTSStyle::ReloadTextures();
 
         FGenDTSCommands::Register();
+        FCompileTsCommands::Register();
+    	FCharacterEditorCommands::Register();
+    	FDataEditorCommands::Register();
+    	FMotionAssetEditorCommands::Register();
+    	FEntryMainCommands::Register();
+    	FProjectileEditorCommands::Register();
+    	FJYLevelEditorCommands::Register();
+    	FTsTaskEditorCommands::Register();
 
         PluginCommands = MakeShareable(new FUICommandList);
 
         PluginCommands->MapAction(FGenDTSCommands::Get().PluginAction,
             FExecuteAction::CreateRaw(this, &FDeclarationGenerator::GenUeDtsCallback), FCanExecuteAction());
 
+        CompileCommands = MakeShareable(new FUICommandList);
+        CompileCommands->MapAction(FCompileTsCommands::Get().CompileTs,
+            FExecuteAction::CreateRaw(this, &FDeclarationGenerator::CompileTsCallback), FCanExecuteAction());
+
+        CharacterEditorCommands = MakeShareable(new FUICommandList);
+    	CharacterEditorCommands->MapAction(FCharacterEditorCommands::Get().TsCharacterEditorCommandInfo,
+    	FExecuteAction::CreateRaw(this, &FDeclarationGenerator::CharacterEditorStart), FCanExecuteAction());
+    	
+    	DataEditorCommands = MakeShareable(new FUICommandList);
+    	DataEditorCommands->MapAction(FDataEditorCommands::Get().TsDataEditorCommandInfo,
+		FExecuteAction::CreateRaw(this, &FDeclarationGenerator::DataEditorStart), FCanExecuteAction());
+
+    	MotionAssetEditorCommands = MakeShareable(new FUICommandList);
+    	MotionAssetEditorCommands->MapAction(FMotionAssetEditorCommands::Get().TsMotionEditorCommandInfo,
+		FExecuteAction::CreateRaw(this, &FDeclarationGenerator::MotionEditorStart), FCanExecuteAction());
+
+    	EntryMainCommands = MakeShareable(new FUICommandList);
+    	EntryMainCommands->MapAction(FEntryMainCommands::Get().TsEntryMainCommandInfo,
+		FExecuteAction::CreateRaw(this, &FDeclarationGenerator::EntryMainStart), FCanExecuteAction());
+
+    	ProjectileEditorCommands = MakeShareable(new FUICommandList);
+        ProjectileEditorCommands->MapAction(FProjectileEditorCommands::Get().TsProjectileEditorCommandInfo,
+        FExecuteAction::CreateRaw(this, &FDeclarationGenerator::ProjectileEditorStart), FCanExecuteAction());
+
+    	JYLevelEditorCommands = MakeShareable(new FUICommandList);
+        JYLevelEditorCommands->MapAction(FJYLevelEditorCommands::Get().TsJYLevelEditorCommandInfo,
+        FExecuteAction::CreateRaw(this, &FDeclarationGenerator::JYLevelEditorStart), FCanExecuteAction());
+
+    	GenerateTsTaskCommands = MakeShareable(new FUICommandList);
+    	GenerateTsTaskCommands->MapAction(FTsTaskEditorCommands::Get().TsGenerateTsTask,
+		FExecuteAction::CreateRaw(this, &FDeclarationGenerator::GenerateTsTaskStart), FCanExecuteAction());
+    	
+        
 #if (ENGINE_MAJOR_VERSION >= 5)
         UToolMenus::RegisterStartupCallback(
             FSimpleMulticastDelegate::FDelegate::CreateRaw(this, &FDeclarationGenerator::RegisterMenus));
@@ -1596,6 +2072,14 @@ public:
 #endif
         FGenDTSStyle::Shutdown();
         FGenDTSCommands::Unregister();
+        FCompileTsCommands::Unregister();
+    	FCharacterEditorCommands::Unregister();
+    	FDataEditorCommands::Unregister();
+    	FMotionAssetEditorCommands::Unregister();
+    	FEntryMainCommands::Unregister();
+    	FProjectileEditorCommands::Unregister();
+    	FJYLevelEditorCommands::Unregister();
+    	FTsTaskEditorCommands::Unregister();
     }
 
     void GenTypeScriptDeclaration(bool InGenFull, FName InSearchPath) override
