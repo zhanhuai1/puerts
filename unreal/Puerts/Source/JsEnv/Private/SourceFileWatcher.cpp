@@ -35,7 +35,7 @@ void FSourceFileWatcher::OnSourceLoaded(const FString& InPath)
             IDirectoryWatcher::FDirectoryChanged::CreateRaw(this, &FSourceFileWatcher::OnDirectoryChanged), DelegateHandle,
             IDirectoryWatcher::IgnoreChangesInSubtree);
         WatchedDirs.Emplace(Dir, DelegateHandle);
-        UE_LOG(Puerts, Log, TEXT("add watched dir: %s"), *Dir);
+        UE_LOG(Puerts, Verbose, TEXT("add watched dir: %s"), *Dir);
     }
     if (!WatchedFiles.Contains(Dir))
     {
@@ -43,7 +43,7 @@ void FSourceFileWatcher::OnSourceLoaded(const FString& InPath)
     }
     if (!WatchedFiles[Dir].Contains(FileName))
     {
-        UE_LOG(Puerts, Log, TEXT("add watched file: %s"), *InPath);
+        UE_LOG(Puerts, Verbose, TEXT("add watched file: %s"), *InPath);
         FMD5Hash Hash = FMD5Hash::HashFile(*InPath);
         WatchedFiles[Dir].Add(FileName, Hash);
     }

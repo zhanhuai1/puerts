@@ -113,7 +113,8 @@ declare module "ue" {
     function NewArray<T extends SupportedContainerKVType>(t: T): TArray<ContainerKVType<T>>;
     function NewSet<T extends SupportedContainerKVType>(t: T): TSet<ContainerKVType<T>>;
     function NewMap<TKey extends SupportedContainerKVType, TValue extends SupportedContainerKVType>(k: TKey, v: TValue): TMap<ContainerKVType<TKey>, ContainerKVType<TValue>>;
-    
+    function NewWeak<T extends Object>(t?: T):TWeakObjectPtr<T>;
+	
     type DataPropertyNames<T> = {
         [K in keyof T]: T[K] extends (...args: any) => any ? never : K;
     }[keyof T];
@@ -129,7 +130,10 @@ declare module "ue" {
     function FNameLiteral(str:string):string;
     
     type TWeakObjectPtr<T> = {
-        [K in keyof T]: T[K];
+		Assign(t:T):void;
+		IsValid():boolean;		
+		Get():T;
+        // [K in keyof T]: T[K];
     }
 
     type TSoftObjectPtr<T> = {

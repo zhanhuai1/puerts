@@ -14,6 +14,11 @@
 #include "Modules/ModuleManager.h"
 #include "CoreMinimal.h"
 
+namespace puerts
+{
+	class FJsEnv;
+}
+
 class PUERTS_API IPuertsModule : public IModuleInterface
 {
 public:
@@ -50,6 +55,22 @@ public:
 
     virtual const TArray<FString>& GetIgnoreStructListOnDTS() = 0;
 
+	// JYGame Begin
+	virtual void CallMixinConstructor(UObject* Object) = 0;
+
+	virtual void EvalJS(const FString& Source,UWorld* InWorld) = 0;
+
+	virtual puerts::FJsEnv* GetEnv() = 0;
+
+	virtual void EnableRecord(bool Enable) = 0;
+
+	virtual TArray<FString> GetLoadedModules() = 0;
+
+	virtual void ClearLoadedModules() = 0;
+	
+    virtual FString CurrentStackTrace() = 0;
+	// JYGame End
+	
 #if WITH_EDITOR
     virtual bool IsInPIE() = 0;
 #endif

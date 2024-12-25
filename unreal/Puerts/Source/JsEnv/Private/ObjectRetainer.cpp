@@ -16,6 +16,14 @@
 
 namespace PUERTS_NAMESPACE
 {
+void FObjectRetainer::ForEach(TFunctionRef<void(const UObject*)> PerElementFunction) const
+{
+	for (auto Obj : RetainedObjects)
+	{
+		PerElementFunction(Obj);
+	}
+}
+
 void FObjectRetainer::Retain(UObject* Object)
 {
 #ifdef THREAD_SAFE
@@ -27,7 +35,7 @@ void FObjectRetainer::Retain(UObject* Object)
     }
 }
 
-void FObjectRetainer::Release(UObject* Object)
+void FObjectRetainer::Release(const UObject* Object)
 {
 #ifdef THREAD_SAFE
     FScopeLock ScopeLock(&RetainedObjectsCritical);

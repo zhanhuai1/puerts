@@ -13,6 +13,8 @@
 
 #include "Modules/ModuleManager.h"
 #include "CoreMinimal.h"
+#include "UObject/StrongObjectPtr.h"
+#include "EditorJSHelper.h"
 
 class IPuertsEditorModule : public IModuleInterface
 {
@@ -28,4 +30,12 @@ public:
     }
 
     virtual void SetCmdImpl(std::function<void(const FString&, const FString&)> Func) = 0;
+
+	virtual void SetCompileJSFunc(std::function<int()>) = 0;
+	
+	virtual FString EditorJsEnvCurrentStack() = 0;
+
+	virtual int GenAndCompileJS() = 0;
+	
+	virtual TStrongObjectPtr<UEditorJSHelper> GetEditorJSHelper() = 0;
 };

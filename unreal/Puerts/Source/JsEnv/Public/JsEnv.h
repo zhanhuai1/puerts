@@ -34,6 +34,8 @@ public:
 
     virtual void RequestFullGarbageCollectionForTesting() = 0;
 
+	virtual void ForceReleaseWorldReference(UWorld* World) = 0;
+	
     virtual void WaitDebugger(double Timeout) = 0;
 
 #if !defined(ENGINE_INDEPENDENT_JSENV)
@@ -52,9 +54,35 @@ public:
 
     virtual void InitExtensionMethodsMap() = 0;
 
+    virtual void ClearClassInfo(UClass* Class) = 0;
+
+	// JYGame Begin
+	virtual void CallMixinConstructor(UObject *Object) = 0;
+
+	virtual void EvalJS(const FString& JsSource,UWorld* InWorld) = 0;
+	// JYGame End
+	
     virtual ~IJsEnv()
     {
     }
+	
+	#pragma region HotFix
+    
+    	virtual void ClearLoadedModules() = 0;
+    
+    	virtual void EnableRecord(bool Enable) = 0;
+    
+    	virtual TArray<FString> GetLoadedModules() = 0;
+    	
+    private:
+    	/**
+    	 * 已经加载的模块
+    	 */
+    	TArray<FString> LoadedModules;
+    
+    	bool bIsRecord;
+    #pragma endregion 
+	
 };
 
 class JSENV_API FJsEnv    // : public TSharedFromThis<FJsEnv> // only a wrapper
@@ -64,7 +92,7 @@ public:
 
     FJsEnv(std::shared_ptr<IJSModuleLoader> InModuleLoader, std::shared_ptr<ILogger> InLogger, int InDebugPort,
         std::function<void(const FString&)> InOnSourceLoadedCallback = nullptr, const FString InFlags = FString(),
-        void* InExternalRuntime = nullptr, void* InExternalContext = nullptr);
+        void* InExternalRuntime = nullptr, void* InExternalContext = nullptr, bool IsEditorEnv = false);
 
     void Start(const FString& ModuleName, const TArray<TPair<FString, UObject*>>& Arguments = TArray<TPair<FString, UObject*>>(),
         bool IsScript = false);
@@ -80,6 +108,9 @@ public:
     // equivalent to Isolate->RequestGarbageCollectionForTesting(v8::Isolate::kFullGarbageCollection)
     void RequestFullGarbageCollectionForTesting();
 
+	// 强制释放World相关引用
+	void ForceReleaseWorldReference(UWorld* World);
+	
     void WaitDebugger(double Timeout = 0);
 
     void TryBindJs(const class UObjectBase* InObject);
@@ -96,6 +127,20 @@ public:
 
     void InitExtensionMethodsMap();
 
+    void ClearClassInfo(UClass* Class);
+
+	// JYGame Begin
+	void CallMixinConstructor(UObject *Object);
+
+	void EvalJS(const FString& JsSource,UWorld* InWorld);
+
+	void EnableRecord(bool Enable);
+
+	TArray<FString> GetLoadedModules();
+
+	void ClearLoadedModules();
+	// JYGame End
+	
 private:
     std::unique_ptr<IJsEnv> GameScript;
 };

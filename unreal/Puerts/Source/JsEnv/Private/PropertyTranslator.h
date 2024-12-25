@@ -136,6 +136,9 @@ public:
         BoolPropertyMacro* BoolProperty;
         ObjectPropertyBaseMacro* ObjectBaseProperty;
         SoftObjectPropertyMacro* SoftObjectProperty;
+    	// JYGame Begin
+    	WeakObjectPropertyMacro* WeakObjectProperty;
+    	// JYGame End
         SoftClassPropertyMacro* SoftClassProperty;
         InterfacePropertyMacro* InterfaceProperty;
         NamePropertyMacro* NameProperty;

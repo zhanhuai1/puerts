@@ -75,7 +75,13 @@ declare module "puerts" {
     function toDelegate<T extends (...args: any) => any>(owner: Object, callback: T): $Delegate<T>;
 
     function load<T>(dllpath): T;
+	
+	function AddToEnv(Object: any) : void;
 
+	function RemoveFromEnv(Object: any) : void;
+
+	function IsObjectValid<T extends Object>(Obj: T) : boolean;
+	
     /*function getProperties(obj: Object, ...propNames:string[]): any;
     function getPropertiesAsync(obj: Object, ...propNames:string[]): Promise<any>;
     function setProperties(obj: Object, properties: any):void;

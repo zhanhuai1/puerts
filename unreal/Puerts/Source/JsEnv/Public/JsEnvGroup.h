@@ -22,7 +22,7 @@ public:
 
     FJsEnvGroup(int Size, std::shared_ptr<IJSModuleLoader> InModuleLoader, std::shared_ptr<ILogger> InLogger, int InDebugStartPort,
         std::function<void(const FString&)> InOnSourceLoadedCallback = nullptr, const FString InFlags = FString(),
-        void* InExternalRuntime = nullptr, void* InExternalContext = nullptr);
+        void* InExternalRuntime = nullptr, void* InExternalContext = nullptr, bool IsEditorEnv = false);
 
     ~FJsEnvGroup();
 
@@ -37,6 +37,10 @@ public:
     std::shared_ptr<IJsEnv> Get(int Index);
 
     void SetJsEnvSelector(std::function<int(UObject*, int)> InSelector);
+
+	// JYGame Begin
+	void CallMixinConstructor(UObject* Object);
+	// JYGame End
 
 private:
     std::vector<std::shared_ptr<IJsEnv>> JsEnvList;

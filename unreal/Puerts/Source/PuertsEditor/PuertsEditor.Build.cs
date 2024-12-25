@@ -45,6 +45,8 @@ public class PuertsEditor : ModuleRules
             PrivateDependencyModuleNames.Add("SourceControl");
             PublicDefinitions.Add("PUERTS_WITH_SOURCE_CONTROL");
         }
+
+        PrivateDependencyModuleNames.AddRange(new string[] { "DeclarationGenerator" });
         
         bEnableUndefinedIdentifierWarnings = false; // 避免在VS 2017编译时出现C4668错误
     }

@@ -485,6 +485,67 @@ public:
 private:
 };
 
+class FWeakObjectPropertyTranslator : public FPropertyWithDestructorReflection
+{
+public:
+	explicit FWeakObjectPropertyTranslator(PropertyMacro* InProperty) : FPropertyWithDestructorReflection(InProperty)
+	{
+	}
+	
+	v8::Local<v8::Value> UEToJs(
+		v8::Isolate* Isolate, v8::Local<v8::Context>& Context, const void* ValuePtr, bool PassByPointer) const override
+	{
+		// // 等价UObject版
+		// UObject* UEObject = ObjectBaseProperty->GetObjectPropertyValue(ValuePtr);
+		//
+		// if (!UEObject || !UEObject->IsValidLowLevelFast() || UEObjectIsPendingKill(UEObject))
+		// {
+		// 	return v8::Undefined(Isolate);
+		// }
+		// return FV8Utils::IsolateData<IObjectMapper>(Isolate)->FindOrAdd(Isolate, Context, UEObject->GetClass(), UEObject);
+		UObject* UEObject = WeakObjectProperty->GetObjectPropertyValue(ValuePtr);
+		FWeakObjectPtr* WeakObjectPtr = nullptr;
+		if (PassByPointer)
+		{
+			WeakObjectPtr = const_cast<FWeakObjectPtr*>(WeakObjectProperty->GetPropertyValuePtr(ValuePtr));
+		}
+		else
+		{
+			WeakObjectPtr = new FWeakObjectPtr(UEObject);
+			if (!UEObject || !UEObject->IsValidLowLevelFast() || UEObjectIsPendingKill(UEObject))
+			{
+				// 如果WeakObjectPtr已经无效，就没必要把原始地址填进去了
+				UEObject = nullptr;
+			}
+		}
+		
+		return FV8Utils::IsolateData<IObjectMapper>(Isolate)->AddWeakObjectPtr(Isolate, Context, WeakObjectPtr, !PassByPointer);
+	}
+	bool JsToUE(v8::Isolate* Isolate, v8::Local<v8::Context>& Context, const v8::Local<v8::Value>& Value, void* ValuePtr,
+		bool DeepCopy) const override
+	{
+		// // 等价UObject版
+		// auto Object = FV8Utils::GetUObject(Context, Value);
+		// if (FV8Utils::IsReleasedPtr(Object))
+		// {
+		// 	FV8Utils::ThrowException(Isolate, "passing a invalid object");
+		// 	return false;
+		// }
+		// ObjectBaseProperty->SetObjectPropertyValue(ValuePtr, Object);
+		// return true;
+		
+		FWeakObjectPtr* Ptr = static_cast<FWeakObjectPtr*>(FV8Utils::GetPointer(Context, Value));
+		if (!Ptr)
+		{
+			FV8Utils::ThrowException(Isolate, "passing a invalid object for FWeakObjectPtr");
+			return false;
+		}
+		WeakObjectProperty->SetPropertyValue(ValuePtr, *Ptr);
+		return true;
+	}
+private:
+};
+	
 class FSoftObjectPropertyTranslator : public FPropertyWithDestructorReflection
 {
 public:
@@ -1262,11 +1323,14 @@ struct PropertyTranslatorCreator
         {
             return Creator<FClassPropertyTranslator>::Do(InProperty, IgnoreOut, Ptr);
         }
-        else if (InProperty->IsA<ObjectPropertyMacro>() || InProperty->IsA<WeakObjectPropertyMacro>() ||
-                 InProperty->IsA<LazyObjectPropertyMacro>())
+        else if (InProperty->IsA<ObjectPropertyMacro>() || InProperty->IsA<LazyObjectPropertyMacro>())
         {
             return Creator<FObjectPropertyTranslator>::Do(InProperty, IgnoreOut, Ptr);
         }
+    	else if (InProperty->IsA<WeakObjectPropertyMacro>())
+    	{
+    		return Creator<FWeakObjectPropertyTranslator>::Do(InProperty, IgnoreOut, Ptr);
+    	}
         else if (InProperty->IsA<SoftClassPropertyMacro>())
         {
             return Creator<FSoftClassPropertyTranslator>::Do(InProperty, IgnoreOut, Ptr);

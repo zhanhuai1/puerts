@@ -5,7 +5,7 @@
 * This file is subject to the terms and conditions defined in file 'LICENSE', which is part of this source code package.
 */
 
-#if PLATFORM_IOS
+#if defined(PLATFORM_IOS) && PLATFORM_IOS
 
 #import <Foundation/Foundation.h>
 #include <pesapi.h>

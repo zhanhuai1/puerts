@@ -1350,3 +1350,5 @@ void UPEBlueprintAsset::Save()
     }
     FunctionAdded.Empty();
 }
+
+#undef LOCTEXT_NAMESPACE

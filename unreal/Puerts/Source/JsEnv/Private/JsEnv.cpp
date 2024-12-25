@@ -18,10 +18,10 @@ FJsEnv::FJsEnv(const FString& ScriptRoot)
 
 FJsEnv::FJsEnv(std::shared_ptr<IJSModuleLoader> InModuleLoader, std::shared_ptr<ILogger> InLogger, int InDebugPort,
     std::function<void(const FString&)> InOnSourceLoadedCallback, const FString InFlags, void* InExternalRuntime,
-    void* InExternalContext)
+    void* InExternalContext, bool IsEditorEnv)
 {
     GameScript = std::make_unique<FJsEnvImpl>(
-        std::move(InModuleLoader), InLogger, InDebugPort, InOnSourceLoadedCallback, InFlags, InExternalRuntime, InExternalContext);
+        std::move(InModuleLoader), InLogger, InDebugPort, InOnSourceLoadedCallback, InFlags, InExternalRuntime, InExternalContext, IsEditorEnv);
 }
 
 void FJsEnv::Start(const FString& ModuleName, const TArray<TPair<FString, UObject*>>& Arguments, bool IsScript)
@@ -47,6 +47,11 @@ void FJsEnv::RequestMinorGarbageCollectionForTesting()
 void FJsEnv::RequestFullGarbageCollectionForTesting()
 {
     GameScript->RequestFullGarbageCollectionForTesting();
+}
+
+void FJsEnv::ForceReleaseWorldReference(UWorld* World)
+{
+	GameScript->ForceReleaseWorldReference(World);
 }
 
 void FJsEnv::WaitDebugger(double timeout)
@@ -76,6 +81,38 @@ void FJsEnv::InitExtensionMethodsMap()
     GameScript->InitExtensionMethodsMap();
 }
 
+void FJsEnv::ClearClassInfo(UClass* Class)
+{
+    GameScript->ClearClassInfo(Class);
+}
+
+void FJsEnv::CallMixinConstructor(UObject *Object)
+{
+	GameScript->CallMixinConstructor(Object);
+}
+
+void FJsEnv::EvalJS(const FString& JsSource,UWorld* InWorld)
+{
+	GameScript->EvalJS(JsSource,InWorld);
+}
+
+#pragma region HotFix
+void FJsEnv::EnableRecord(bool Enable)
+{
+	GameScript->EnableRecord(Enable);
+}
+
+TArray<FString> FJsEnv::GetLoadedModules()
+{
+	return GameScript->GetLoadedModules();
+}
+
+void FJsEnv::ClearLoadedModules()
+{
+	GameScript->ClearLoadedModules();
+}
+#pragma endregion 
+
 void FJsEnv::ReloadModule(FName ModuleName, const FString& JsSource)
 {
     GameScript->ReloadModule(ModuleName, JsSource);
@@ -90,5 +127,4 @@ void FJsEnv::OnSourceLoaded(std::function<void(const FString&)> Callback)
 {
     GameScript->OnSourceLoaded(Callback);
 }
-
 }    // namespace PUERTS_NAMESPACE

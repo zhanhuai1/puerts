@@ -29,6 +29,14 @@
 #define RELEASED_UOBJECT ((UObject*) 12)
 #define RELEASED_UOBJECT_MEMBER ((void*) 12)
 
+// JYGame Begin
+#define WITH_OUTER_LINK 1
+template <typename T>
+inline void __USE(T&&)
+{
+}
+// JYGame End
+
 namespace PUERTS_NAMESPACE
 {
 template <typename T, typename FT, typename = void>
@@ -42,7 +50,7 @@ struct TOuterLinker
 V8_INLINE void LinkOuterImpl(v8::Local<v8::Context> Context, v8::Local<v8::Value> Outer, v8::Local<v8::Value> Inner)
 {
 #ifdef WITH_OUTER_LINK
-    Inner.As<v8::Object>()->Set(Context, 0, Outer);
+    __USE(Inner.As<v8::Object>()->Set(Context, 0, Outer));
 #endif
 }
 

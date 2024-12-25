@@ -28,9 +28,11 @@ namespace PUERTS_NAMESPACE
 class JSENV_API FObjectRetainer : public FGCObject
 {
 public:
-    void Retain(UObject* Object);
+	void ForEach(TFunctionRef<void(const UObject*)> PerElementFunction) const;
 
-    void Release(UObject* Object);
+	void Retain(UObject* Object);
+
+    void Release(const UObject* Object);
 
     void Clear();
 

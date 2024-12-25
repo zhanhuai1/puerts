@@ -34,6 +34,9 @@ public class JsEnv : ModuleRules
 
     private bool FTextAsString = true;
     
+    // v8 9.4+
+    private bool SingleThreaded = false;
+    
     public static bool WithSourceControl = false;
     
     public JsEnv(ReadOnlyTargetRules Target) : base(Target)
@@ -41,10 +44,15 @@ public class JsEnv : ModuleRules
 #if UE_5_3_OR_LATER
         PCHUsage = PCHUsageMode.NoPCHs;
 #endif
+	    CppStandard = CppStandardVersion.Cpp20;
         PublicDefinitions.Add("USING_IN_UNREAL_ENGINE");
         //PublicDefinitions.Add("WITH_V8_FAST_CALL");
         
         PublicDefinitions.Add("TS_BLUEPRINT_PATH=\"/Blueprints/TypeScript/\"");
+        if (Target.Platform == UnrealTargetPlatform.Linux)
+        {
+	        SingleThreaded = true;
+        }
         
         PublicDefinitions.Add(ThreadSafe ? "THREAD_SAFE" : "NOT_THREAD_SAFE");
 
@@ -57,7 +65,7 @@ public class JsEnv : ModuleRules
 
         PublicDependencyModuleNames.AddRange(new string[]
         {
-            "Core", "CoreUObject", "Engine", "ParamDefaultValueMetas", "UMG"
+            "Core", "CoreUObject", "Engine", "ParamDefaultValueMetas", "UMG", "GMP"
         });
 
         if (Target.bBuildEditor)
@@ -346,6 +354,10 @@ public class JsEnv : ModuleRules
 
     void ThirdParty(ReadOnlyTargetRules Target)
     {
+	    if (SingleThreaded)
+	    {
+		    PrivateDefinitions.Add("USING_SINGLE_THREAD_PLATFORM");
+	    }
         //Add header
         string HeaderPath = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "ThirdParty", "Include"));
         PublicIncludePaths.AddRange(new string[] { Path.Combine(HeaderPath, "websocketpp") });

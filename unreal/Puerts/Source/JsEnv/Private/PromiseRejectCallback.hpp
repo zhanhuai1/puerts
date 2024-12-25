@@ -82,27 +82,30 @@ std::string StackTraceToString(v8::Isolate* InIsolate, v8::Local<v8::StackTrace>
         const int LineNumber = StackFrame->GetLineNumber();
         const int Column = StackFrame->GetColumn();
 
-        if (StackFrame->IsEval())
-        {
-            if (StackFrame->GetScriptId() == v8::Message::kNoScriptIdInfo)
-            {
-                stm << "    at [eval]:" << LineNumber << ":" << Column << std::endl;
-            }
-            else
-            {
-                stm << "    at [eval] (" << *ScriptName << ":" << LineNumber << ":" << Column << ")" << std::endl;
-            }
-            break;
-        }
+    	if(*ScriptName)
+    	{
+    		if (StackFrame->IsEval())
+    		{
+    			if (StackFrame->GetScriptId() == v8::Message::kNoScriptIdInfo)
+    			{
+    				stm << "    at [eval]:" << LineNumber << ":" << Column << std::endl;
+    			}
+    			else
+    			{
+    				stm << "    at [eval] (" << *ScriptName << ":" << LineNumber << ":" << Column << ")" << std::endl;
+    			}
+    			break;
+    		}
 
-        if (FuncName.length() == 0)
-        {
-            stm << "    at " << *ScriptName << ":" << LineNumber << ":" << Column << std::endl;
-        }
-        else
-        {
-            stm << "    at " << *FuncName << "(" << *ScriptName << ":" << LineNumber << ":" << Column << ")" << std::endl;
-        }
+    		if (FuncName.length() == 0)
+    		{
+    			stm << "    at " << *ScriptName << ":" << LineNumber << ":" << Column << std::endl;
+    		}
+    		else
+    		{
+    			stm << "    at " << *FuncName << "(" << *ScriptName << ":" << LineNumber << ":" << Column << ")" << std::endl;
+    		}
+    	}
     }
     return stm.str();
 }

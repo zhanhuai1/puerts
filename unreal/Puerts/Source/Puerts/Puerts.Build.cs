@@ -11,18 +11,27 @@ using UnrealBuildTool;
 
 public class Puerts : ModuleRules 
 {
-    public Puerts(ReadOnlyTargetRules Target) : base(Target) 
+    public Puerts(ReadOnlyTargetRules Target) : base(Target)
     {
+	    bEnableUndefinedIdentifierWarnings = false;
+        PrivateDependencyModuleNames.AddRange(new string[] {  });
         PublicDependencyModuleNames.AddRange(
             new string[]
             {
-                "Core", "CoreUObject", "Engine", "InputCore", "Serialization", "OpenSSL","UMG","JsEnv",
+                "Core", "CoreUObject", "Engine", "InputCore", "Serialization", "OpenSSL","UMG","JsEnv","Json"
             }
         );
         
         if (Target.bBuildEditor == true)
         {
-            PrivateDependencyModuleNames.Add("UnrealEd");
+            PrivateDependencyModuleNames.AddRange(
+                new string[]
+                {
+                    "UnrealEd",
+                    "Blutility",
+                    "BlueprintGraph",
+                }
+            );
         }
 
         //PublicDefinitions.Add(string.Format("DECL_OUTPUT_PATH={0}", Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "Content", "Scripts"))));

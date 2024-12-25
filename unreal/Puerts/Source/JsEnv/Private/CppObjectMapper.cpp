@@ -67,7 +67,9 @@ v8::Local<v8::Value> FCppObjectMapper::FindOrAddCppObject(
 {
     if (Ptr == nullptr)
     {
-        return v8::Undefined(Isolate);
+        // return v8::Undefined(Isolate);
+    	// https://github.com/puerts/puerts_experimental_any_engine/commit/25b245006a87772ed0bcad894c1fae0025028a4f
+    	return v8::Null(Isolate);
     }
 
     if (PassByPointer)

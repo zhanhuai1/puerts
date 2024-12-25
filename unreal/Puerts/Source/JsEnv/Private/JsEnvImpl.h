@@ -55,6 +55,8 @@
 #define WITH_BACKING_STORE_AUTO_FREE 1
 #endif
 
+DECLARE_LOG_CATEGORY_EXTERN(LogJsEnv, Warning, All);
+
 namespace PUERTS_NAMESPACE
 {
 class JSError
@@ -78,21 +80,29 @@ public:
 
     FJsEnvImpl(std::shared_ptr<IJSModuleLoader> InModuleLoader, std::shared_ptr<ILogger> InLogger, int InPort,
         std::function<void(const FString&)> InOnSourceLoadedCallback, const FString InFlags, void* InExternalRuntime,
-        void* InExternalContext);
+        void* InExternalContext, bool IsEditorEnv);
 
     virtual ~FJsEnvImpl() override;
 
     virtual void Start(
         const FString& ModuleNameOrScript, const TArray<TPair<FString, UObject*>>& Arguments, bool IsScript) override;
 
+    // 通知V8目前空闲，在截止时间之前可以进行GC
     virtual bool IdleNotificationDeadline(double DeadlineInSeconds) override;
 
+    // 通知V8低内存，约等于强制GC
     virtual void LowMemoryNotification() override;
 
+    // 当开启了--expose_gc时有效，强制GC，主要是新生代对象
     virtual void RequestMinorGarbageCollectionForTesting() override;
 
+    // 当开启了--expose_gc时有效，强制GC, 全量GC
     virtual void RequestFullGarbageCollectionForTesting() override;
 
+	// 释放PIE的引用
+	virtual void ForceReleaseWorldReference(UWorld* World) override;
+
+    // 等待调试器连接，设置里开启WaitDebugger后有效
     virtual void WaitDebugger(double timeout) override
     {
 #ifdef THREAD_SAFE
@@ -118,9 +128,12 @@ public:
     virtual void RebindJs() override;
 #endif
 
+    // 当前V8调用栈
     virtual FString CurrentStackTrace() override;
 
     virtual void InitExtensionMethodsMap() override;
+
+    virtual void ClearClassInfo(UClass* Class) override;
 
     void JsHotReload(FName ModuleName, const FString& JsSource);
 
@@ -133,6 +146,39 @@ public:
     virtual void OnSourceLoaded(std::function<void(const FString&)> Callback) override;
 
 public:
+
+	// JYGame Begin
+    virtual void CallMixinConstructor(UObject* Obj) override;
+
+	void MixinFromNative(UClass* Class);
+
+    virtual void EvalJS(const FString& RawSource,UWorld* InWorld) override;
+
+	//Crash之后打印堆栈
+	void OnCrash();
+
+protected:
+	TMap<TWeakObjectPtr<UClass>, v8::UniquePersistent<v8::Function> > MixinJsClassConstructor;
+
+#pragma region HotFix
+
+	virtual void ClearLoadedModules() override;
+
+	virtual void EnableRecord(bool Enable) override;
+
+	virtual TArray<FString> GetLoadedModules() override;
+private:
+	/**
+	 * 已经加载的模块
+	 */
+	TArray<FString> LoadedModules;
+
+	bool bIsRecord;
+#pragma endregion
+	
+public:
+	// JYGame End
+	
     bool IsTypeScriptGeneratedClass(UClass* Class);
 
     virtual void Bind(FClassWrapper* ClassWrapper, UObject* UEObject, v8::Local<v8::Object> JSObject) override;
@@ -210,10 +256,15 @@ public:
 
     virtual bool IsInstanceOf(UStruct* Struct, v8::Local<v8::Object> JsObject) override;
 
-    virtual bool IsInstanceOfCppObject(v8::Isolate* Isolate, const void* TypeId, v8::Local<v8::Object> JsObject) override;
+    virtual bool IsInstanceOfCppObject(const void* TypeId, v8::Local<v8::Object> JsObject) override;
 
     virtual std::weak_ptr<int> GetJsEnvLifeCycleTracker() override;
 
+	// JYGame Begin
+	virtual v8::Local<v8::Value> AddWeakObjectPtr(v8::Isolate* Isolate, v8::Local<v8::Context> Context,
+		FWeakObjectPtr* WeakObjectPtr, bool NeedDelete) override;
+	// JYGame End
+	
     virtual v8::Local<v8::Value> AddSoftObjectPtr(v8::Isolate* Isolate, v8::Local<v8::Context> Context,
         FSoftObjectPtr* SoftObjectPtr, UClass* Class, bool IsSoftClass) override;
 
@@ -285,6 +336,16 @@ private:
 
     void NewContainer(const v8::FunctionCallbackInfo<v8::Value>& Info);
 
+	// JYGame Begin
+	void AddToEnvRef(const v8::FunctionCallbackInfo<v8::Value>& Info);
+	
+	void RemoveFromEnvRef(const v8::FunctionCallbackInfo<v8::Value>& Info);
+
+	void IsObjectValid(const v8::FunctionCallbackInfo<v8::Value>& Info);
+
+	void NewWeakObjectPtr(const v8::FunctionCallbackInfo<v8::Value>& Info);
+	// JYGame End
+	
     std::shared_ptr<FStructWrapper> GetStructWrapper(UStruct* InStruct, bool& IsReuseTemplate);
 
     struct FTemplateInfo
@@ -293,6 +354,7 @@ private:
         std::shared_ptr<FStructWrapper> StructWrapper;
     };
 
+	// 生成C++类的TS映射对象模板
     FTemplateInfo* GetTemplateInfoOfType(UStruct* Class, bool& Existed);
 
     v8::Local<v8::Function> GetJsClass(UStruct* Class, v8::Local<v8::Context> Context);
@@ -303,13 +365,17 @@ private:
 
     void SetFTickerDelegate(const v8::FunctionCallbackInfo<v8::Value>& Info, bool Continue);
 
-    bool TimerCallback(int DelegateHandleId, bool Continue);
+    bool TimerCallback(int DelegateHandleId, int IncreaseDelegateHandleId, bool Continue);
 
-    void RemoveFTickerDelegateHandle(int HandleId);
+    void RemoveFTickerDelegateHandle(int IncreaseDelegateHandleId);
 
     void SetInterval(const v8::FunctionCallbackInfo<v8::Value>& Info);
 
     void ClearInterval(const v8::FunctionCallbackInfo<v8::Value>& Info);
+
+	int GetNextTimerIncreaseHandle(int HandleId);
+
+	int RemoveTimerIncreaseHandle(int IncreaseDelegateHandleId);
 
     void MergeObject(const v8::FunctionCallbackInfo<v8::Value>& Info);
 
@@ -322,6 +388,8 @@ private:
 
     TArray<TWeakObjectPtr<UClass>> MixinClasses;
     void Mixin(const v8::FunctionCallbackInfo<v8::Value>& Info);
+
+	UClass* MixinInternal(UClass* To, v8::Local<v8::Object>& MixinMethods, bool Inherit, bool TakeJsObjectRef, v8::Isolate* Isolate, v8::Local<v8::Context>& Context);
 #endif
 
     void FindModule(const v8::FunctionCallbackInfo<v8::Value>& Info);
@@ -484,11 +552,15 @@ private:
 
     FObjectRetainer SysObjectRetainer;
 
+	FObjectRetainer ManualObjectRetainer;
+
     std::shared_ptr<IJSModuleLoader> ModuleLoader;
 
     std::shared_ptr<ILogger> Logger;
 
     bool Started;
+
+	bool IsEditorEnv;
 
 private:
     v8::Isolate::CreateParams CreateParams;
@@ -670,6 +742,10 @@ private:
 
     v8::UniquePersistent<v8::FunctionTemplate> SoftObjectPtrTemplate;
 
+	// JYGame Begin
+	v8::UniquePersistent<v8::FunctionTemplate> WeakObjectPtrTemplate;
+	// JYGame End
+	
     std::map<void*, DelegateObjectInfo> DelegateMap;
 
     TMap<UFunction*, TsFunctionInfo> TsFunctionMap;
@@ -686,6 +762,10 @@ private:
         FUETickDelegateHandle TickerHandle;
     };
     TSparseArray<FTimerInfo> TimerInfos;
+
+	TMap<int, int> TimerIncreaseHandleToHandles;
+
+	int CurTimerIncreaseHandle = 0;
 
     FUETickDelegateHandle DelegateProxiesCheckerHandler;
 
