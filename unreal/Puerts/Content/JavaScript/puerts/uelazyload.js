@@ -168,7 +168,7 @@ var global = global || (function () { return this; }());
     
     let __tgjsMixin = global.__tgjsMixin;
     global.__tgjsMixin = undefined;
-    
+		
     function mixin(to, mixinClass, config) {
         config = config || {};
         let mixinMethods = Object.create(null);
@@ -201,7 +201,24 @@ var global = global || (function () { return this; }());
     }
     
     blueprint.mixin = mixin;
-    
+
+	// JYGame Begin
+	puerts.AddToEnv = global.AddToEnv;
+	puerts.RemoveFromEnv = global.RemoveFromEnv;
+	puerts.IsObjectValid = global.IsObjectValid;
+	
+	function mixinFromC(to, mixinClass, ObjectTakeByNative) {
+		let wrapTo = {
+			StaticClass : ()=>{ return to; }
+		}
+		let config = { objectTakeByNative:ObjectTakeByNative, noMixinedWarning:true}
+		return mixin(wrapTo, mixinClass, config)
+	}
+	
+	blueprint.mixinFromC = mixinFromC;
+	
+	// JYGame End
+	
     function unmixin(to) {
         __tgjsMixin(to.StaticClass(), {}, undefined, undefined, undefined, true);
     }
@@ -251,6 +268,7 @@ var global = global || (function () { return this; }());
     puerts.blueprint = blueprint;
     
     const newContainer = global.__tgjsNewContainer;
+	const newWeakObjectPtr = global.__tgjsNewWeakObjectPtr;
     global.__tgjsNewContainer = undefined;
     
     function translateType(t) {
@@ -274,7 +292,7 @@ var global = global || (function () { return this; }());
                 let index = 0;
                 let num = this.Num();
                 while (index < num) {
-                    yield this.Get(index);
+                    yield this.GetRef(index);
                     index++;
                 }
             }
@@ -292,7 +310,7 @@ var global = global || (function () { return this; }());
                 let maxIndex = this.GetMaxIndex();
                 while (index < maxIndex) {
                     if (this.IsValidIndex(index)) {
-                        yield this.Get(index);
+                        yield this.GetRef(index);
                     }
                     index++;
                 }
@@ -313,7 +331,7 @@ var global = global || (function () { return this; }());
                 while (index < maxIndex) {
                     if (this.IsValidIndex(index)) {
                         let key = this.GetKey(index);
-                        let value = this.Get(key);
+                        let value = this.GetRef(key);
                         yield [key, value];
                     }
                     index++;
@@ -322,7 +340,12 @@ var global = global || (function () { return this; }());
         }
         return ret;
     }
-    
+
+	function NewWeak(obj)
+	{
+		return newWeakObjectPtr(obj)
+	}
+	
     cache.BuiltinBool = 0;
     cache.BuiltinByte = 1;
     cache.BuiltinInt = 2;
@@ -340,7 +363,8 @@ var global = global || (function () { return this; }());
     cache.NewArray = NewArray;
     cache.NewSet = NewSet;
     cache.NewMap = NewMap;
-    
+	cache.NewWeak = NewWeak;
+	
     const FunctionFlags = {
         FUNC_None                : 0x00000000,
 

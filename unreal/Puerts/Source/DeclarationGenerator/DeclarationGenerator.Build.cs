@@ -37,9 +37,18 @@ public class DeclarationGenerator : ModuleRules
                 "Projects",
                 "JsEnv",
                 "Puerts",
+                "UMGEditor",
+                "Blutility",
 #if UE_5_0_OR_LATER
                 "ToolMenus",
 #endif
+            }
+        );
+
+        PrivateDependencyModuleNames.AddRange(
+            new string[]
+            {
+                "Utility",
             }
         );
 

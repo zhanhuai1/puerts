@@ -53,6 +53,8 @@ var global = global || (function () { return this; }());
 
     let moduleCache = Object.create(null);
     let buildinModule = Object.create(null);
+    let needReloadModule = Object.create(null);
+
     function executeModule(fullPath, script, debugPath, sid, isESM) {
         sid = (typeof sid == 'undefined') ? 0 : sid;
         let fullPathInJs = fullPath.replace(/\\/g, '\\\\');
@@ -79,6 +81,7 @@ var global = global || (function () { return this; }());
     function genRequire(requiringDir, outerIsESM) {
         let localModuleCache = Object.create(null);
         function require(moduleName) {
+            // console.log("[require] " + moduleName)
             if (org_require) {
                 try {
                     return org_require(moduleName);
@@ -88,7 +91,14 @@ var global = global || (function () { return this; }());
             let forceReload = false;
             if ((moduleName in localModuleCache)) {
                 let m = localModuleCache[moduleName];
-                if (!m.__forceReload) {
+                if (needReloadModule[moduleName])
+                {
+                    forceReload = true;
+                    needReloadModule[moduleName] = undefined;
+                    // console.log("[require] fire reload=> " + moduleName + " " + (moduleName in needReloadModule).toString())
+                }
+                else if (!m.__forceReload) {
+                    // console.log("[require] use localModuleCache=> " + moduleName)
                     return localModuleCache[moduleName].exports;
                 } else {
                     forceReload = true;
@@ -113,6 +123,7 @@ var global = global || (function () { return this; }());
             let key = fullPath;
             if ((key in moduleCache) && !forceReload) {
                 localModuleCache[moduleName] = moduleCache[key];
+                // console.log("[require] write localModuleCache " + moduleName)
                 return localModuleCache[moduleName].exports;
             }
             let m = {"exports":{}};
@@ -167,6 +178,12 @@ var global = global || (function () { return this; }());
         return require;
     }
     
+    function clearRequireCache(moduleName)
+    {
+        // console.log("clearRequireCache Mark " + moduleName);
+        needReloadModule[moduleName] = true;
+    }
+    
     function registerBuildinModule(name, module) {
         buildinModule[name] = module;
     }
@@ -214,4 +231,8 @@ var global = global || (function () { return this; }());
     puerts.forceReload = forceReload;
     
     puerts.getModuleByUrl = getModuleByUrl;
+    
+    puerts.__clearRequireCache = clearRequireCache;
+
+    global.clearRequireCache = puerts.__clearRequireCache;
 }(global));

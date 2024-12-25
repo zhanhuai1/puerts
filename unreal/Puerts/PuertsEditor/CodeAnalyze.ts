@@ -416,7 +416,7 @@ function watch(configFilePath:string) {
         fileNames.forEach(fileName => {
             fileVersions[fileName] = restoredFileVersions[fileName] || fileVersions[fileName];
         });
-        logErrors(diagnostics);
+        // logErrors(diagnostics);
     } else {
         function getClassPathInfo(sourceFilePath: string): {moduleFileName:string, modulePath:string} {
             let modulePath:string = undefined;
@@ -1142,11 +1142,39 @@ function watch(configFilePath:string) {
         refreshBlueprints();
     }
 
+    function compilediff(args: string): void {
+        let compileCnt = 0;
+        for (var fileName in fileVersions) {
+            let md5 = UE.FileSystemOperation.FileMD5Hash(fileName);
+            if (md5 === fileVersions[fileName].version) {
+                console.log(fileName + " md5 not changed, so skiped!");
+            } else {
+                console.log(`${fileName} md5 from ${fileVersions[fileName].version} to ${md5}`);
+                fileVersions[fileName].version = md5;
+                onSourceFileAddOrChange(fileName, false);
+                compileCnt++;
+            }
+        }
+        refreshBlueprints();
+        if (compileCnt <= 0)
+        {
+            console.log("all files not changed, skiped!");
+        }
+        else
+        {
+            console.log("versions saved to " + versionsFilePath);
+            UE.FileSystemOperation.WriteFile(versionsFilePath, JSON.stringify(fileVersions, null, 4));
+        }
+    }
+    
     function dispatchCmd(cmd:string, args:string) {
+        compilediff(args);
         if (cmd == 'ls') {
             list(args);
         } else if (cmd == 'compile') {
             compile(args);
+        } else if (cmd == 'compilediff') {
+            compilediff(args);
         } else {
             console.error(`unknow command for Puerts ${cmd}`);
         }

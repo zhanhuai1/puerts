@@ -372,9 +372,16 @@ function watch(configFilePath) {
     }
     if (diagnostics.length > 0) {
         fileNames.forEach(fileName => {
-            fileVersions[fileName] = restoredFileVersions[fileName] || fileVersions[fileName];
+            if (restoredFileVersions[fileName])
+            {
+                fileVersions[fileName] = restoredFileVersions[fileName]
+            }
+            else
+            {
+                fileVersions[fileName].version = "0"
+            }
         });
-        logErrors(diagnostics);
+        // logErrors(diagnostics);
     }
     else {
         function getClassPathInfo(sourceFilePath) {
@@ -491,7 +498,8 @@ function watch(configFilePath) {
             newFiles.forEach(fileName => onSourceFileAddOrChange(fileName, true, program));
         }
     }
-    function onSourceFileAddOrChange(sourceFilePath, reload, program, doEmitJs = true, doEmitBP = true) {
+    function onSourceFileAddOrChange(sourceFilePath, reload, program, doEmitJs = true, doEmitBP = true, logWrite = true) {
+		let successFlag = true;
         if (!program) {
             let beginTime = new Date().getTime();
             program = getProgramFromService();
@@ -505,6 +513,7 @@ function watch(configFilePath) {
             ];
             let checker = program.getTypeChecker();
             if (diagnostics.length > 0) {
+				successFlag = false;
                 logErrors(diagnostics);
             }
             else {
@@ -520,7 +529,10 @@ function watch(configFilePath) {
                         let jsSource = undefined;
                         emitOutput.outputFiles.forEach(output => {
                             if (doEmitJs) {
-                                console.log(`write ${output.name} ...`);
+                                if (logWrite)
+                                {
+                                    console.log(`write ${output.name} ...`);
+                                }
                                 UE.FileSystemOperation.WriteFile(output.name, output.text);
                             }
                             if (output.name.endsWith(".js") || output.name.endsWith(".mjs")) {
@@ -536,60 +548,17 @@ function watch(configFilePath) {
                             UE.FileSystemOperation.PuertsNotifyChange(moduleFileName, jsSource);
                         }
                         if (!doEmitBP)
-                            return;
+							return successFlag;
                         let foundType = undefined;
                         let foundBaseTypeUClass = undefined;
                         ts.forEachChild(sourceFile, (node) => {
                             if (ts.isExportAssignment(node) && ts.isIdentifier(node.expression)) {
-                                const type = checker.getTypeAtLocation(node.expression);
-                                if (!type || !type.getSymbol())
-                                    return;
-                                if (type.getSymbol().getName() != tsi.getBaseFileName(moduleFileName)) {
-                                    //console.error("type name must the same as file name!");
-                                    return;
-                                }
-                                let baseTypes = type.getBaseTypes();
-                                if (!baseTypes || baseTypes.length != 1)
-                                    return;
-                                let structOfType = getUClassOfType(baseTypes[0]);
-                                let baseTypeUClass = undefined;
-                                if (!structOfType) {
-                                    return;
-                                }
-                                if (structOfType.GetClass().IsChildOf(UE.Class.StaticClass())) {
-                                    baseTypeUClass = structOfType;
-                                }
-                                else {
-                                    console.warn("do not support UStruct:" + checker.typeToString(type));
-                                    return;
-                                }
-                                if (baseTypeUClass) {
-                                    if (isSubclassOf(type, "Subsystem")) {
-                                        console.error("do not support Subsystem " + checker.typeToString(type));
-                                        return;
-                                    }
-                                    if (!baseTypeUClass.IsNative()) {
-                                        let moduleNames = getModuleNames(baseTypes[0]);
-                                        if (moduleNames.length > 1 && moduleNames[0] == 'ue') {
-                                            console.error(`${checker.typeToString(type)} extends a blueprint`);
-                                            return;
-                                        }
-                                    }
-                                    foundType = type;
-                                    foundBaseTypeUClass = baseTypeUClass;
-                                }
-                                else {
-                                    console.warn("can not find base for " + checker.typeToString(type));
-                                }
+								// NOTE:去除生成代理蓝图功能
                             }
                         });
-                        if (foundType && foundBaseTypeUClass) {
-                            fileVersions[sourceFilePath].isBP = true;
-                            //onBlueprintTypeAddOrChange(foundBaseTypeUClass, foundType, modulePath);
-                            pendingBlueprintRefleshJobs.push({ type: foundType, op: () => onBlueprintTypeAddOrChange(foundBaseTypeUClass, foundType, modulePath) });
-                        }
                     }
                 }
+				return successFlag;
             }
             function typeNameToString(node) {
                 if (ts.isIdentifier(node)) {
@@ -1075,6 +1044,46 @@ function watch(configFilePath) {
         }
         refreshBlueprints();
     }
+    function compilediff(force) {
+        let compileCnt = 0;
+		let errorCnt = 0;
+        for (var fileName in fileVersions) {
+            let md5 = UE.FileSystemOperation.FileMD5Hash(fileName);
+            if (md5 === fileVersions[fileName].version && !force) {
+                //console.log(fileName + " md5 not changed, so skiped!");
+            }
+            else {
+				if (!force)
+				{
+					console.log(`${fileName} md5 from ${fileVersions[fileName].version} to ${md5}`);
+				}
+                fileVersions[fileName].version = md5;
+				if (!onSourceFileAddOrChange(fileName, false, undefined, true, true, false))
+				{
+					errorCnt++;
+				}
+                compileCnt++;
+            }
+        }
+        refreshBlueprints();
+        if (compileCnt <= 0)
+        {
+            console.log("all files not changed, skiped!");
+        }
+        else
+        {
+            console.warn("compiled:" + compileCnt.toString() + ",  with failed count:" + errorCnt.toString());
+            console.log("versions saved to " + versionsFilePath);
+            UE.FileSystemOperation.WriteFile(versionsFilePath, JSON.stringify(fileVersions, null, 4));
+        }
+		return errorCnt;
+    }
+	
+	function compileAll()
+	{
+		return compilediff(true)
+	}
+	
     function dispatchCmd(cmd, args) {
         if (cmd == 'ls') {
             list(args);
@@ -1082,11 +1091,17 @@ function watch(configFilePath) {
         else if (cmd == 'compile') {
             compile(args);
         }
+        else if (cmd = 'compilediff')
+        {
+            compilediff(args); // NOTE: js.map映射没改
+        }
         else {
             console.error(`unknow command for Puerts ${cmd}`);
         }
     }
+	
     cpp.FPuertsEditorModule.SetCmdCallback(dispatchCmd);
+	cpp.FPuertsEditorModule.ExportCompileJSFunc(compileAll);
 }
 watch(customSystem.getCurrentDirectory() + "tsconfig.json");
 //# sourceMappingURL=CodeAnalyze.js.map
