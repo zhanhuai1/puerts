@@ -12,6 +12,22 @@ namespace Puerts.UnitTest
         {
             value = val;
         }
+        
+        static int tmp;
+        
+        public int WriteOnly
+        {
+            set {
+                tmp = value;
+            }
+        }
+        
+        public static int StaticWriteOnly
+        {
+            set {
+                tmp = value;
+            }
+        }
     }
     public struct TestStruct
     {
@@ -126,7 +142,7 @@ namespace Puerts.UnitTest
 
         public TestHelper()
         {
-#if UNITY_EDITOR || !EXPERIMENTAL_IL2CPP_PUERTS
+#if UNITY_EDITOR || !PUERTS_IL2CPP_OPTIMIZATION
             var env = UnitTestEnv.GetEnv();
             env.UsingFunc<int>();
             env.UsingFunc<int, int>();
@@ -521,6 +537,35 @@ namespace Puerts.UnitTest
             AssertAndPrint("InvokeReturnNativeStructTestFunc", srcValue.value, ret.value);
         }
     }
+    
+            
+    public class FooVE
+    {
+        public IFoo foo;
+
+        public FooVE()
+        {
+            foo = new FooAccess();
+        }
+        
+        static FooVE _instance;
+
+        public static FooVE Instance()
+        {
+            if (_instance == null) _instance = new FooVE();
+            return _instance;
+        }
+    }
+
+    public interface IFoo
+    {
+        float width { get; }
+    }
+
+    internal class FooAccess : IFoo
+    {
+        float IFoo.width => 125f; // Note the explicit interface `IFoo.`
+    }
 
     [TestFixture]
     public class CrossLangTest
@@ -554,6 +599,42 @@ namespace Puerts.UnitTest
                 })()
             ");
             jsEnv.Tick();
+        }
+        
+        [Test]
+        public void WriteOnlyTest()
+        {
+            var jsEnv = UnitTestEnv.GetEnv();
+            jsEnv.Eval(@"
+                (function() {
+                    let o = new CS.Puerts.UnitTest.TestObject(1);
+                    let v = o.WriteOnly;
+                    let sv = CS.Puerts.UnitTest.TestObject.StaticWriteOnly
+                })()
+            ");
+            jsEnv.Tick();
+        }
+        
+        [Test]
+        public void NoNewOnStaticFunction()
+        {
+            var jsEnv = UnitTestEnv.GetEnv();
+            try 
+            {
+                jsEnv.Eval(@"
+                    (function() {
+                        const TestHelper = CS.Puerts.UnitTest.TestHelper;
+                        new TestHelper.GetInstance();
+                    })()
+                ");
+            } 
+            catch(Exception e) 
+            {
+                StringAssert.Contains("not a constructor", e.Message);
+                jsEnv.Tick();
+                return;
+            }
+            throw new Exception("unexpected to reach here");
         }
         [Test]
         public void NumberInstanceTest()
@@ -877,6 +958,41 @@ namespace Puerts.UnitTest
             ");
             Assert.AreEqual("213 1 213", ret);
             jsEnv.Tick();
+        }
+        
+        [Test]
+        public void AccessExplicitnterfaceImplementation()
+        {
+            var jsEnv = UnitTestEnv.GetEnv();
+
+            var ret = jsEnv.Eval<float>(@"
+                (function() {
+                    const foove = CS.Puerts.UnitTest.FooVE.Instance();
+                    console.log(foove);
+                    console.log(foove.foo);
+                    console.log(foove.foo.width);
+                    return foove.foo.width;
+                })()
+            ");
+            Assert.AreEqual(FooVE.Instance().foo.width, ret);
+            jsEnv.Tick();
+        }
+
+        [Test]
+        public void CallDelegateAfterJsEnvDisposed()
+        {
+#if PUERTS_GENERAL
+            var jsEnv = new JsEnv(new TxtLoader());
+#else
+            var jsEnv = new JsEnv(new DefaultLoader());
+#endif
+            var callback = jsEnv.Eval<Action>("() => console.log('hello')");
+            callback();
+            jsEnv.Dispose();
+            Assert.Catch(() =>
+            {
+                callback();
+            });
         }
     }
 }

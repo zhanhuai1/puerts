@@ -27,6 +27,11 @@ public class TxtLoader : IResolvableLoader,  ILoader, IModuleChecker
 
     public bool FileExists(string specifier)
     {
+        if (nullFiles.Contains(specifier))
+        {
+            Console.WriteLine("FileExists return null for " + specifier);
+            return true;
+        }
         var res = !System.String.IsNullOrEmpty(Resolve(specifier, "."));
         return res;
     }
@@ -64,6 +69,10 @@ public class TxtLoader : IResolvableLoader,  ILoader, IModuleChecker
 
     public string Resolve(string specifier, string referrer)
     {
+        if (nullFiles.Contains(specifier))
+        {
+            return specifier;
+        }
         if (PathHelper.IsRelative(specifier))
         {
             specifier = PathHelper.normalize(PathHelper.Dirname(referrer) + "/" + specifier);
@@ -78,6 +87,11 @@ public class TxtLoader : IResolvableLoader,  ILoader, IModuleChecker
 
     public string ReadFile(string filepath, out string debugpath)
     {
+        if (nullFiles.Contains(filepath))
+        {
+            debugpath = string.Empty;
+            return null;
+        }
         debugpath = Path.Combine(root, filepath);
         if (File.Exists(Path.Combine(editorRoot, filepath)))
         {
@@ -105,6 +119,12 @@ public class TxtLoader : IResolvableLoader,  ILoader, IModuleChecker
     {
         mockFileContent.Add(fileName, content);
     }
+    
+    private HashSet<string> nullFiles = new HashSet<string>();
+    public void AddNullFile(string fileName)
+    {
+        nullFiles.Add(fileName);
+    }
 }
 
 namespace UnityEngine.Scripting
@@ -129,7 +149,17 @@ namespace Puerts.UnitTest
             if (env == null) 
             {
                 loader = new TxtLoader();
-                env = new JsEnv(loader);
+                if (System.Environment.GetEnvironmentVariable("SwitchToQJS") == "1")
+                {
+                    System.Console.Write("---------------------SwitchToQJS------------------------\n");
+                    env = new JsEnv(loader, -1, BackendType.QuickJS, System.IntPtr.Zero, System.IntPtr.Zero);
+                }
+                else
+                {
+                    System.Console.Write("---------------------Default JsEnv------------------------\n");
+                    env = new JsEnv(loader);
+                }
+                
                 CommonJS.InjectSupportForCJS(env);
 #if PUERTS_GENERAL && !TESTING_REFLECTION
                 PuertsStaticWrap.PuerRegisterInfo_Gen.AddRegisterInfoGetterIntoJsEnv(env);

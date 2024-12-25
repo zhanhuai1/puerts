@@ -31,7 +31,6 @@ If you want to use this feature outside of the `JsEnv` module itself, such as an
     - Find the `JsEnv.Build.cs` file and change `UseNewV8` to `true`
 - In the module's `*.Build.cs`
     - Add a dependency to the `JsEnv` module
-    - Set `bEnableUndefinedIdentifierWarnings` to `false`
 
 ## Examples
 
@@ -107,6 +106,24 @@ CombineOverloads(
     )
 ```
 
+### Static Variables
+
+~~~c++
+class TestClass
+{
+public:
+    static int StaticInt;
+};
+~~~
+
+Statement
+
+~~~c++
+puerts::DefineClass<TestClass>()
+    .Variable("StaticInt", MakeVariable(&TestClass::StaticInt))
+    .Register();
+~~~
+
 ### Member variables
 
 ``` c++
@@ -126,6 +143,38 @@ puerts::DefineClass<TestClass>()
     .Property("Y", MakeProperty(&TestClass::Y))
     .Register();
 ```
+
+### Getter and Setter
+
+~~~c++
+class TestClass
+{
+private:
+    int32_t _x;
+    
+    static int _si;
+
+public:
+    int32_t GetX()
+	{
+		return _x;
+	}
+    
+    static int32_t GetStaticInt()
+	{
+		return _si;
+	}
+};
+~~~
+
+Statement
+
+~~~c++
+puerts::DefineClass<TestClass>()
+    .Property("X", MakePropertyByGetterSetter(&TestClass::GetX, nullptr))
+    .Variable("StaticInt", MakeVariableByGetterSetter(&TestClass::GetStaticInt, nullptr))
+    .Register();
+~~~
 
 ### Constructor
 

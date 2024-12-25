@@ -9,7 +9,11 @@ cmake_policy(SET CMP0091 NEW)
 
 project(PuertsPlugin)
 
-set(CMAKE_CXX_STANDARD 14)
+if("${JS_ENGINE}" MATCHES "^v8_10.6.194")
+    set(CMAKE_CXX_STANDARD 17)
+else ()
+    set(CMAKE_CXX_STANDARD 14)
+endif ()
 
 if ( IOS )
         set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fembed-bitcode")
@@ -28,7 +32,17 @@ if ( NOT DEFINED JS_ENGINE )
     set(JS_ENGINE v8)
 endif()
 
-set(BACKEND_ROOT ${PROJECT_SOURCE_DIR}/.backends/${JS_ENGINE})
+set(USING_MULT_BACKEND OFF)
+if("${JS_ENGINE}" MATCHES "^mult")
+    set(USING_MULT_BACKEND ON)
+endif()
+
+set(USING_QUICKJS OFF)
+if("${JS_ENGINE}" MATCHES "^quickjs")
+    set(USING_QUICKJS ON)
+endif()
+
+set(BACKEND_ROOT ${PROJECT_SOURCE_DIR}/../native_src/.backends/${JS_ENGINE})
 
 set(ThirdParty ${PROJECT_SOURCE_DIR}/../../unreal/Puerts/ThirdParty)
 
@@ -46,31 +60,17 @@ include_directories(
 )
 
 set ( PUERTS_INC
+    Inc/Common.h
     Inc/Log.h
     Inc/BackendEnv.h
     Inc/JSEngine.h
     Inc/V8Utils.h
     Inc/JSFunction.h
+    Inc/IPuertsPlugin.h
     ${PROJECT_SOURCE_DIR}/../../unreal/Puerts/Source/JsEnv/Private/V8InspectorImpl.h
     ${PROJECT_SOURCE_DIR}/../../unreal/Puerts/Source/JsEnv/Private/PromiseRejectCallback.hpp
 )
 
-set ( PUERTS_SRC
-    Src/Puerts.cpp
-    Src/Log.cpp
-    Src/BackendEnv.cpp
-    Src/JSEngine.cpp
-    Src/JSFunction.cpp
-    ${PROJECT_SOURCE_DIR}/../../unreal/Puerts/Source/JsEnv/Private/V8InspectorImpl.cpp
-)
-
-if(DEFINED PUERTS_EXTRA_SRC)
-    list(APPEND PUERTS_SRC ${PUERTS_EXTRA_SRC})
-endif()
-
-if(DEFINED PUERTS_EXTRA_INC)
-    include_directories(${PUERTS_EXTRA_INC})
-endif()
 
 macro(source_group_by_dir proj_dir source_files)
     if(MSVC OR APPLE)
@@ -92,6 +92,53 @@ endmacro(source_group_by_dir)
 source_group_by_dir(${CMAKE_CURRENT_SOURCE_DIR} PUERTS_INC)
 source_group_by_dir(${CMAKE_CURRENT_SOURCE_DIR} PUERTS_SRC)
 
+if( USING_MULT_BACKEND )
+    message("mult backend>>>>>>>>>>>>>>>>>>>>>>>>")
+    set ( PUERTS_SRC
+        Src/Log.cpp
+        Src/PuertsMultBackend.cpp
+    )
+else ()
+    set ( PUERTS_SRC
+        Src/Puerts.cpp
+        Src/Log.cpp
+        Src/BackendEnv.cpp
+        Src/JSEngine.cpp
+        Src/JSFunction.cpp
+        ${PROJECT_SOURCE_DIR}/../../unreal/Puerts/Source/JsEnv/Private/V8InspectorImpl.cpp
+    )
+endif()
+
+set(PUERTS_COMPILE_DEFINITIONS)
+set(PUERTS_BACKEND_SRC)
+
+if (NOT USING_MULT_BACKEND AND NOT USING_QUICKJS AND NOT WITHOUT_IL2CPP_OPTIMIZATION)
+    list(APPEND PUERTS_COMPILE_DEFINITIONS WITH_IL2CPP_OPTIMIZATION)
+    list(APPEND PUERTS_SRC
+       Src/CppObjectMapper.cpp
+       Src/DataTransfer.cpp
+       Src/JSClassRegister.cpp
+       Src/PesapiAddonLoad.cpp
+       Src/PesapiV8Impl.cpp
+    )
+endif()
+
+if ( WITH_WEBSOCKET )
+    list(APPEND PUERTS_COMPILE_DEFINITIONS WITH_WEBSOCKET)
+    if (USING_MULT_BACKEND)
+        list(APPEND PUERTS_BACKEND_SRC ${PROJECT_SOURCE_DIR}/../../unreal/Puerts/Source/JsEnv/Private/WebSocketImpl.cpp)
+    else ()
+        list(APPEND PUERTS_SRC ${PROJECT_SOURCE_DIR}/../../unreal/Puerts/Source/JsEnv/Private/WebSocketImpl.cpp)
+    endif()
+endif()
+
+if(DEFINED PUERTS_EXTRA_SRC)
+    list(APPEND PUERTS_SRC ${PUERTS_EXTRA_SRC})
+endif()
+
+if(DEFINED PUERTS_EXTRA_INC)
+    include_directories(${PUERTS_EXTRA_INC})
+endif()
 
 if ( APPLE )
     if ( IOS )
@@ -116,20 +163,181 @@ if ( APPLE )
             PRIVATE "-Wl,-rpath,@loader_path/"
         )
     endif ()
-else ()
-    add_library(puerts SHARED
+elseif ( SWITCH_PLATFORM )
+    add_library(puerts STATIC
         ${PUERTS_SRC} ${PUERTS_INC}
     )
+else ()
+    if (CMAKE_SYSTEM_NAME MATCHES "Emscripten") 
+        add_library(puerts STATIC
+            ${PUERTS_SRC} ${PUERTS_INC}
+        )
+    else ()
+        add_library(puerts SHARED
+            ${PUERTS_SRC} ${PUERTS_INC}
+        )
+   endif ()
 endif ()
 
-# target_compile_definitions (puerts PRIVATE THREAD_SAFE)
+if ( WITH_WEBSOCKET EQUAL 3 )
+    set(OPENSSL_SOURCE_DIR ${CMAKE_CURRENT_BINARY_DIR}/openssl-src) # default path by CMake
+    set(OPENSSL_INSTALL_DIR ${CMAKE_CURRENT_BINARY_DIR}/openssl)
+    set(OPENSSL_INCLUDE_DIR ${OPENSSL_INSTALL_DIR}/include)
+    set(OPENSSL_BUILD_COMMAND make)
+    set(OPENSSL_LIBRARY_SUFFIX a)
+    set(OPENSSL_CONFIGURE_COMMAND ${OPENSSL_SOURCE_DIR}/config)
+    if(WIN32)
+        if(CMAKE_SIZEOF_VOID_P EQUAL 4)
+            # 32位 Windows
+            set(OPENSSL_PLATFORM_CONF_ARG "VC-WIN32")
+        elseif(CMAKE_SIZEOF_VOID_P EQUAL 8)
+            # 64位 Windows
+            set(OPENSSL_PLATFORM_CONF_ARG "VC-WIN64A")
+        endif()
+        set(OPENSSL_BUILD_COMMAND nmake)
+        set(OPENSSL_LIBRARY_SUFFIX lib)
+        set(OPENSSL_CONFIGURE_COMMAND perl ${OPENSSL_SOURCE_DIR}/Configure ${OPENSSL_PLATFORM_CONF_ARG})
+    endif()
+
+    include(ExternalProject)
+
+    ExternalProject_Add(
+      OpenSSL
+      SOURCE_DIR ${OPENSSL_SOURCE_DIR}
+      GIT_REPOSITORY https://github.com/openssl/openssl.git
+      GIT_TAG OpenSSL_1_1_1t
+      #GIT_TAG openssl-3.0.5
+      USES_TERMINAL_DOWNLOAD TRUE
+      CONFIGURE_COMMAND
+        ${OPENSSL_CONFIGURE_COMMAND}
+        --prefix=${OPENSSL_INSTALL_DIR}
+        --openssldir=${OPENSSL_INSTALL_DIR}
+      BUILD_COMMAND ${OPENSSL_BUILD_COMMAND}
+      TEST_COMMAND ""
+      INSTALL_COMMAND ${OPENSSL_BUILD_COMMAND} install
+      INSTALL_DIR ${OPENSSL_INSTALL_DIR}
+    )
+
+    file(MAKE_DIRECTORY ${OPENSSL_INCLUDE_DIR})
+
+    add_library(OpenSSL::SSL STATIC IMPORTED GLOBAL)
+    set_property(TARGET OpenSSL::SSL PROPERTY IMPORTED_LOCATION ${OPENSSL_INSTALL_DIR}/lib/libssl.${OPENSSL_LIBRARY_SUFFIX})
+    set_property(TARGET OpenSSL::SSL PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${OPENSSL_INCLUDE_DIR})
+    add_dependencies(OpenSSL::SSL OpenSSL)
+
+    add_library(OpenSSL::Crypto STATIC IMPORTED GLOBAL)
+    set_property(TARGET OpenSSL::Crypto PROPERTY IMPORTED_LOCATION ${OPENSSL_INSTALL_DIR}/lib/libcrypto.${OPENSSL_LIBRARY_SUFFIX})
+    set_property(TARGET OpenSSL::Crypto PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${OPENSSL_INCLUDE_DIR})
+    add_dependencies(OpenSSL::Crypto OpenSSL)
+
+    add_dependencies(puerts OpenSSL)
+    target_link_libraries(puerts OpenSSL::SSL OpenSSL::Crypto)
+    list(APPEND PUERTS_COMPILE_DEFINITIONS WITH_WEBSOCKET_SSL)
+endif ()
+
+if ( WITH_WEBSOCKET EQUAL 2 )
+    include(FetchContent)
+
+    FetchContent_Declare(
+        wolfssl
+        GIT_REPOSITORY https://github.com/wolfSSL/wolfssl.git
+        GIT_TAG        v5.7.2-stable 
+    )
+    set(WOLFSSL_EXAMPLES  OFF)
+    set(WOLFSSL_CRYPT_TESTS OFF)
+    set(BUILD_SHARED_LIBS OFF)
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+    
+    if ( APPLE )
+        if ( IOS )
+            set(WOLFSSL_SYS_CA_CERTS OFF)
+        else ()
+            if ( NOT DEFINED FOR_SILICON )
+                set(CMAKE_SYSTEM_PROCESSOR x86_64)
+            else ()
+                set(CMAKE_SYSTEM_PROCESSOR arm64)
+            endif ()
+        endif ()
+    elseif ( OHOS )
+        set(WARNING_C_FLAGS "-Wall -Wextra -Wno-unused")
+    endif ()
+
+    FetchContent_MakeAvailable(wolfssl)
+    
+    target_compile_definitions(wolfssl PUBLIC WOLFSSL_OPENSSLEXTRA WOLFSSL_OPENSSLALL OPENSSL_EXTRA OPENSSL_ALL HAVE_EX_DATA WOLFSSL_OPENSSH)
+    
+    target_link_libraries(puerts wolfssl)
+    
+    target_include_directories(puerts PRIVATE ${wolfssl_SOURCE_DIR}/wolfssl)
+
+    list(APPEND PUERTS_COMPILE_DEFINITIONS WITH_WEBSOCKET_SSL OPENSSL_EXTRA OPENSSL_ALL WOLFSSL_OPENSSH PUERTS_USE_WOLFSSL)
+    
+    if ( WIN32 AND NOT CYGWIN AND NOT ( CMAKE_SYSTEM_NAME STREQUAL "WindowsStore" ) AND NOT ANDROID AND NOT MSYS)
+	    set_property(TARGET wolfssl PROPERTY
+             MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    endif ()
+endif ()
+
+option ( USING_V8 "using v8" ON )
+option ( USING_QJS "using quickjs" ON )
+option ( USING_QJS_SUFFIX "add _qjs to namespace of simule v8 api " ON )
+
+if ( USING_MULT_BACKEND )
+    # -------------------begin v8 backend-------------------------
+    if ( USING_V8)
+        add_library(v8backend STATIC
+            Src/BackendEnv.cpp
+            Src/JSEngine.cpp
+            Src/JSFunction.cpp
+            ${PROJECT_SOURCE_DIR}/../../unreal/Puerts/Source/JsEnv/Private/V8InspectorImpl.cpp
+            Src/PluginImpl.cpp
+            ${PUERTS_BACKEND_SRC}
+        )
+        target_include_directories (v8backend PRIVATE "${BACKEND_ROOT}/Inc/v8")
+        target_compile_definitions (v8backend PRIVATE PUERTS_NAMESPACE=puerts_v8)
+        target_compile_definitions (v8backend PRIVATE MULT_BACKENDS)
+        target_compile_definitions (v8backend PRIVATE V8_BACKEND)
+        set_target_properties(v8backend PROPERTIES POSITION_INDEPENDENT_CODE ON)
+        target_link_libraries(puerts v8backend )
+        target_compile_definitions (puerts PRIVATE V8_BACKEND)
+    endif ()
+    # -------------------end v8 backend-------------------------
+    
+    # -------------------begin qjs backend-------------------------
+    if ( USING_QJS)
+        add_library(qjsbackend STATIC
+            Src/BackendEnv.cpp
+            Src/JSEngine.cpp
+            Src/JSFunction.cpp
+            ${PROJECT_SOURCE_DIR}/../../unreal/Puerts/Source/JsEnv/Private/V8InspectorImpl.cpp
+            Src/PluginImpl.cpp
+            ${PUERTS_BACKEND_SRC}
+        )
+        target_include_directories (qjsbackend PRIVATE "${BACKEND_ROOT}/Inc/quickjs")
+        target_compile_definitions (qjsbackend PRIVATE PUERTS_NAMESPACE=puerts_qjs)
+        target_compile_definitions (qjsbackend PRIVATE MULT_BACKENDS)
+        target_compile_definitions (qjsbackend PRIVATE QJS_BACKEND)
+        target_compile_definitions (qjsbackend PRIVATE WITH_QUICKJS)
+        target_compile_definitions (qjsbackend PRIVATE WITHOUT_INSPECTOR)
+        if (USING_QJS_SUFFIX)
+            target_compile_definitions (qjsbackend PRIVATE USING_QJS_SUFFIX)
+            target_compile_definitions (qjsbackend PRIVATE CUSTOMV8NAMESPACE=v8_qjs)
+        endif ()
+        set_target_properties(qjsbackend PROPERTIES POSITION_INDEPENDENT_CODE ON)
+        target_link_libraries(puerts qjsbackend )
+        target_compile_definitions (puerts PRIVATE QJS_BACKEND)
+    endif ()
+    # -------------------end qjs backend-------------------------
+endif ()
+
+# list(APPEND PUERTS_COMPILE_DEFINITIONS THREAD_SAFE)
 
 if ( WIN32 AND NOT CYGWIN )
-    target_compile_definitions (puerts PRIVATE BUILDING_V8_SHARED)
+    list(APPEND PUERTS_COMPILE_DEFINITIONS BUILDING_V8_SHARED)
 endif ()
 
 if ( NOT CMAKE_BUILD_TYPE MATCHES "Release" )
-    target_compile_definitions (puerts PRIVATE PUERTS_DEBUG)
+    list(APPEND PUERTS_COMPILE_DEFINITIONS PUERTS_DEBUG)
 endif ()
 
 if ( MSYS OR WIN32 )
@@ -142,8 +350,21 @@ if ( MSYS OR WIN32 )
     endif ()
 
     # definition
-    target_compile_definitions (puerts PRIVATE PLATFORM_WINDOWS)
+    list(APPEND PUERTS_COMPILE_DEFINITIONS PLATFORM_WINDOWS)
+elseif ( OHOS )
+    set(BACKEND_LIB_NAMES "-Wl,--whole-archive$<SEMICOLON>${BACKEND_LIB_NAMES}$<SEMICOLON>-Wl,--no-whole-archive")
+    list(APPEND PUERTS_COMPILE_DEFINITIONS PLATFORM_OHOS)
+    if ( OHOS_ARCH STREQUAL "armeabi-v7a")
+        # definition
+        list(APPEND PUERTS_COMPILE_DEFINITIONS PLATFORM_OHOS_ARM)
 
+    elseif ( OHOS_ARCH STREQUAL "arm64-v8a")
+        # definition
+        list(APPEND PUERTS_COMPILE_DEFINITIONS PLATFORM_OHOS_ARM64)
+    else ()
+        # definition
+        list(APPEND PUERTS_COMPILE_DEFINITIONS PLATFORM_OHOS_x64)
+    endif ()
 elseif ( ANDROID )
 
     find_library(log-lib log)
@@ -154,7 +375,7 @@ elseif ( ANDROID )
     set(BACKEND_LIB_NAMES "-Wl,--whole-archive$<SEMICOLON>${BACKEND_LIB_NAMES}$<SEMICOLON>-Wl,--no-whole-archive")
     if ( ANDROID_ABI STREQUAL "armeabi-v7a")
         # definition
-        target_compile_definitions (puerts PRIVATE PLATFORM_ANDROID_ARM)
+        list(APPEND PUERTS_COMPILE_DEFINITIONS PLATFORM_ANDROID_ARM)
 
     elseif ( ANDROID_ABI STREQUAL "arm64-v8a")
         # link
@@ -163,39 +384,40 @@ elseif ( ANDROID )
         )
         
         # definition
-        target_compile_definitions (puerts PRIVATE PLATFORM_ANDROID_ARM64)
+        list(APPEND PUERTS_COMPILE_DEFINITIONS PLATFORM_ANDROID_ARM64)
     else ()
 
-        target_compile_definitions (puerts PRIVATE PLATFORM_ANDROID_x64)
+        list(APPEND PUERTS_COMPILE_DEFINITIONS PLATFORM_ANDROID_x64)
     endif ()
+    
+    target_link_options(puerts PRIVATE -s)
 
     #set_target_properties( puerts PROPERTIES LINK_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/android_version.script)
     #set (CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--gc-sections -Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/android_version.script")
     #set (CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--gc-sections")
-    add_custom_command(TARGET puerts POST_BUILD
-            COMMAND "${ANDROID_TOOLCHAIN_PREFIX}strip" -g -S -d --strip-debug --verbose
-            "${CMAKE_BINARY_DIR}/libpuerts.so" -o
-            "${CMAKE_BINARY_DIR}/libpuerts.stripped.so~"
-            COMMENT "Strip debug symbols done on final binary.")
+    #add_custom_command(TARGET puerts POST_BUILD
+    #        COMMAND "${ANDROID_TOOLCHAIN_PREFIX}strip" -g -S -d --strip-debug --verbose
+    #        "${CMAKE_BINARY_DIR}/libpuerts.so"
+    #        COMMENT "Strip debug symbols done on final binary.")
 
 elseif ( APPLE )
 
     if ( IOS )
         #definition
         if(PLATFORM STREQUAL "SIMULATOR64")
-            target_compile_definitions (puerts PRIVATE PLATFORM_IOS_SIMULATOR)
+            list(APPEND PUERTS_COMPILE_DEFINITIONS PLATFORM_IOS_SIMULATOR)
             message(STATUS "SIMULATOR64 BUILD...")
         else ()
-            target_compile_definitions (puerts PRIVATE PLATFORM_IOS)
+            list(APPEND PUERTS_COMPILE_DEFINITIONS PLATFORM_IOS)
         endif ()
 
     else ()
     
         #definition
         if ( DEFINED FOR_SILICON )
-            target_compile_definitions (puerts PRIVATE PLATFORM_MAC_ARM64)
+            list(APPEND PUERTS_COMPILE_DEFINITIONS PLATFORM_MAC_ARM64)
         endif()
-        target_compile_definitions (puerts PRIVATE PLATFORM_MAC)
+        list(APPEND PUERTS_COMPILE_DEFINITIONS PLATFORM_MAC)
     endif ()
 
 elseif (UNIX)
@@ -203,17 +425,70 @@ elseif (UNIX)
     target_link_libraries(puerts pthread)
     
     # definition
-    target_compile_definitions (puerts PRIVATE PLATFORM_LINUX)
-    set(CMAKE_CXX_COMPILER "clang++")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++")
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++ -lc++abi")
+    list(APPEND PUERTS_COMPILE_DEFINITIONS PLATFORM_LINUX)
+    if (NOT ("${JS_ENGINE}" STREQUAL "nodejs_16") AND NOT ("${JS_ENGINE}" STREQUAL "v8_10.6.194") AND NOT (CMAKE_SYSTEM_NAME MATCHES "Emscripten"))
+        set(CMAKE_CXX_COMPILER "clang++")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++")
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++ -lc++abi")
+    endif ()
 endif ()
+
+# ref https://github.com/Tencent/puerts/issues/1796 Author:NiceTry12138 
+if (SWITCH_PLATFORM) 
+    set(NINTENDO_SDK_ROOT $ENV{NINTENDO_SDK_ROOT})
+    set(NS_INCLUDE "${NINTENDO_SDK_ROOT}/Include")
+    set(NS_SPECIFIC_INCLUDE "${NINTENDO_SDK_ROOT}/TargetSpecificInclude/NX-Win32-v142")
+    set(NS_AARCH64 "${NINTENDO_SDK_ROOT}/Compilers/NX/nx/aarch64")
+    
+    set(NS_INCLUDE_LIST ${NS_INCLUDE})                                      # 定义搜索路径
+    list(APPEND NS_INCLUDE_LIST ${NS_SPECIFIC_INCLUDE})                     # 添加特殊文件搜索路径
+    #list(APPEND NS_INCLUDE_LIST "${NS_AARCH64}/include")                    # 添加 AARCH64 头文件
+    list(APPEND NS_INCLUDE_LIST "${NINTENDO_SDK_ROOT}/Include/nn/socket")   # 网络库相关
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC")
+
+    #set(NS_LIB_LIST "$${NS_AARCH64}/lib")                                   # 添加 AARCH64 静态库
+   
+    if(NS_US_ELF)
+        #list(APPEND NS_INCLUDE_LIST "${NS_AARCH64}/include/aarch64-nintendo-nx-elf")
+        #list(APPEND NS_LIB_LIST "${NS_AARCH64}/lib/aarch64-nintendo-nx-elf")
+    else ()
+        #list(APPEND NS_INCLUDE_LIST "${NS_AARCH64}/include/aarch64-nintendo-nx-nncfi")
+        #list(APPEND NS_LIB_LIST "${NS_AARCH64}/lib/aarch64-nintendo-nx-nncfi")
+    endif()
+    
+    add_compile_options(-fdeclspec)
+    add_definitions(-DNN_SDK_BUILD_RELEASE)
+    #add_definitions(-DNN_SDK_BUILD_DEBUG)
+
+    
+    include_directories(${NS_INCLUDE_LIST})
+    link_directories(${NS_LIB_LIST})
+endif()
 
 # link
 target_link_libraries(puerts
     ${BACKEND_LIB_NAMES}
 )
-target_compile_definitions (puerts PRIVATE ${BACKEND_DEFINITIONS})
+list(APPEND PUERTS_COMPILE_DEFINITIONS ${BACKEND_DEFINITIONS})
+
+target_compile_definitions (puerts PUBLIC ${PUERTS_COMPILE_DEFINITIONS})
+if( USING_MULT_BACKEND )
+    if ( USING_V8)
+        target_compile_definitions (v8backend PUBLIC ${PUERTS_COMPILE_DEFINITIONS})
+        if ( WIN32 AND NOT CYGWIN AND NOT ( CMAKE_SYSTEM_NAME STREQUAL "WindowsStore" ) AND NOT ANDROID AND NOT MSYS)
+            set_property(TARGET v8backend PROPERTY
+                     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+        endif ()
+    endif ()
+    
+    if ( USING_QJS)
+        target_compile_definitions (qjsbackend PUBLIC ${PUERTS_COMPILE_DEFINITIONS})
+        if ( WIN32 AND NOT CYGWIN AND NOT ( CMAKE_SYSTEM_NAME STREQUAL "WindowsStore" ) AND NOT ANDROID AND NOT MSYS)
+            set_property(TARGET qjsbackend PROPERTY
+                     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+        endif ()
+    endif ()
+endif ()
 
 if ( WIN32 AND NOT CYGWIN AND NOT ( CMAKE_SYSTEM_NAME STREQUAL "WindowsStore" ) AND NOT ANDROID AND NOT MSYS)
 	set_property(TARGET puerts PROPERTY

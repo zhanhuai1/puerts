@@ -5,17 +5,27 @@
 * This file is subject to the terms and conditions defined in file 'LICENSE', which is part of this source code package.
 */
 
+using System.Collections.Generic;
 using UnrealBuildTool;
 using System.IO;
 using System.Reflection;
 
 public class JsEnv : ModuleRules
-{
-    private bool UseNewV8 = 
+{    
+    enum SupportedV8Versions
+    {
+        VDeprecated, // for 4.24 or blow only
+        V8_4_371_19,
+        V9_4_146_24,
+        V10_6_194,
+        V11_8_172
+    }
+
+    private SupportedV8Versions UseV8Version = 
 #if UE_4_25_OR_LATER
-        true;
+        SupportedV8Versions.V9_4_146_24;
 #else
-        false;
+        SupportedV8Versions.VDeprecated;
 #endif
 
     private bool UseNodejs = false;
@@ -34,10 +44,16 @@ public class JsEnv : ModuleRules
 
     private bool FTextAsString = true;
     
+    private bool bEditorSuffix = true;
+
     // v8 9.4+
     private bool SingleThreaded = false;
     
     public static bool WithSourceControl = false;
+
+    public bool WithByteCode = false;
+
+    private bool WithWebsocket = false;
     
     public JsEnv(ReadOnlyTargetRules Target) : base(Target)
     {
@@ -55,6 +71,18 @@ public class JsEnv : ModuleRules
         }
         
         PublicDefinitions.Add(ThreadSafe ? "THREAD_SAFE" : "NOT_THREAD_SAFE");
+
+        if (bEditorSuffix)
+        {
+            PublicDefinitions.Add("PUERTS_WITH_EDITOR_SUFFIX");
+        }
+
+        if (WithWebsocket)
+        {
+            PublicDefinitions.Add("WITH_WEBSOCKET");
+            PublicDefinitions.Add("WITH_WEBSOCKET_SSL");
+            PublicDependencyModuleNames.Add("OpenSSL");
+        }
 
         ShadowVariableWarningLevel = WarningLevel.Warning;
 
@@ -74,7 +102,6 @@ public class JsEnv : ModuleRules
         }
 
         bEnableExceptions = true;
-        bEnableUndefinedIdentifierWarnings = false; // 避免在VS 2017编译时出现C4668错误
         var ContextField = GetType().GetField("Context", BindingFlags.Instance | BindingFlags.NonPublic);
         if (ContextField != null)
         {
@@ -93,6 +120,16 @@ public class JsEnv : ModuleRules
         else
         {
             PublicDefinitions.Add("PUERTS_FORCE_CPP_UFUNCTION=0");
+        }
+
+        bool bKeepUObjectReference = true;
+        if(bKeepUObjectReference)
+        {
+            PublicDefinitions.Add("PUERTS_KEEP_UOBJECT_REFERENCE=1");
+        }
+        else
+        {
+            PublicDefinitions.Add("PUERTS_KEEP_UOBJECT_REFERENCE=0");
         }
 
         bool UseWasm = false;
@@ -127,7 +164,7 @@ public class JsEnv : ModuleRules
             ForceStaticLibInEditor = true;
             ThirdPartyQJS(Target);
         }
-        else if (UseNewV8)
+        else if (UseV8Version > SupportedV8Versions.VDeprecated)
         {
             ThirdParty(Target);
         }
@@ -141,6 +178,12 @@ public class JsEnv : ModuleRules
         string coreJSPath = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "Content"));
         string destDirName = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "..", "..", "Content"));
         DirectoryCopy(coreJSPath, destDirName, true);
+
+        // 每次build时拷贝一些手写的.d.ts到Typing目录以同步更新
+        string srcDtsDirName  = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "Typing"));
+        string dstDtsDirName = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "..", "..", "Typing"));
+        DirectoryCopy(srcDtsDirName, dstDtsDirName, true);
+
     }
 
     void OldThirdParty(ReadOnlyTargetRules Target)
@@ -335,13 +378,14 @@ public class JsEnv : ModuleRules
         PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "v8.dll.lib"));
         PublicAdditionalLibraries.Add(Path.Combine(V8LibraryPath, "v8_libplatform.dll.lib"));
 
-        AddRuntimeDependencies(new string[]
-        {
+        List<string> deps = new List<string> {
             "v8.dll",
             "v8_libplatform.dll",
-            "v8_libbase.dll",
-            "zlib.dll"
-        }, V8LibraryPath, false);
+            "v8_libbase.dll"
+        };
+        deps.Add(UseV8Version == SupportedV8Versions.V11_8_172 ? "third_party_zlib.dll" : "zlib.dll");
+
+        AddRuntimeDependencies(deps.ToArray(), V8LibraryPath, false);
     }
     
     void MacDylib(string LibraryPath)
@@ -350,21 +394,55 @@ public class JsEnv : ModuleRules
         PublicAdditionalLibraries.Add(Path.Combine(LibraryPath, "libv8_libplatform.dylib"));
         PublicAdditionalLibraries.Add(Path.Combine(LibraryPath, "libv8_libbase.dylib"));
         PublicAdditionalLibraries.Add(Path.Combine(LibraryPath, "libchrome_zlib.dylib"));
+        if (UseV8Version == SupportedV8Versions.V11_8_172)
+        {
+            PublicAdditionalLibraries.Add(Path.Combine(LibraryPath, "libthird_party_abseil-cpp_absl.dylib"));
+        }
     }
 
     void ThirdParty(ReadOnlyTargetRules Target)
     {
-	    if (SingleThreaded)
-	    {
-		    PrivateDefinitions.Add("USING_SINGLE_THREAD_PLATFORM");
-	    }
+        if (SingleThreaded)
+        {
+            PrivateDefinitions.Add("USING_SINGLE_THREAD_PLATFORM");
+        }
+
+        if (WithByteCode)
+        {
+            PrivateDefinitions.Add("WITH_V8_BYTECODE");
+        }
+
+        string v8LibSuffix = "";
+        
+        if (UseV8Version == SupportedV8Versions.V8_4_371_19)
+        {
+            if(Directory.Exists(Path.Combine(ModuleDirectory, "..", "..", "ThirdParty", "v8_8.4.371.19")))
+            {
+                v8LibSuffix = "_8.4.371.19";
+            }
+        }
+        else if (UseV8Version == SupportedV8Versions.V9_4_146_24)
+        {
+            v8LibSuffix = "_9.4.146.24";
+        }
+        else if (UseV8Version == SupportedV8Versions.V10_6_194)
+        {
+            v8LibSuffix = "_10.6.194";
+        }
+        else if (UseV8Version == SupportedV8Versions.V11_8_172)
+        {
+#if !UE_5_0_OR_LATER
+            CppStandard = CppStandardVersion.Cpp17;
+#endif
+            v8LibSuffix = "_11.8.172";
+        }
         //Add header
         string HeaderPath = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "ThirdParty", "Include"));
         PublicIncludePaths.AddRange(new string[] { Path.Combine(HeaderPath, "websocketpp") });
         PublicIncludePaths.AddRange(new string[] { Path.Combine(HeaderPath, "asio") });
-        PublicIncludePaths.AddRange(new string[] { Path.Combine(ModuleDirectory, "..", "..", "ThirdParty", "v8", "Inc") });
+        PublicIncludePaths.AddRange(new string[] { Path.Combine(ModuleDirectory, "..", "..", "ThirdParty", "v8" + v8LibSuffix, "Inc") });
 
-        string LibraryPath = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "ThirdParty", "v8", "Lib"));
+        string LibraryPath = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "ThirdParty", "v8" + v8LibSuffix, "Lib"));
         if (Target.Platform == UnrealTargetPlatform.Win64)
         {
             if (!Target.bBuildEditor || ForceStaticLibInEditor)
@@ -554,10 +632,14 @@ public class JsEnv : ModuleRules
             PublicDefinitions.Add("WITH_QJS_NAMESPACE_SUFFIX=1");
             PublicDefinitions.Add("QJSV8NAMESPACE=v8_qjs");
         }
+        
+        string ThirdPartyPath = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "ThirdParty"));
+        string HeaderPath = Path.GetFullPath(Path.Combine(ThirdPartyPath, "Include"));
+        PublicIncludePaths.AddRange(new string[] { Path.Combine(HeaderPath, "websocketpp") });
+        PublicIncludePaths.AddRange(new string[] { Path.Combine(HeaderPath, "asio") });
+        PublicIncludePaths.AddRange(new string[] { Path.Combine(ThirdPartyPath, "quickjs", "Inc") });
 
-        PublicIncludePaths.AddRange(new string[] { Path.Combine(ModuleDirectory, "..", "..", "ThirdParty", "quickjs", "Inc") });
-
-        string LibraryPath = Path.GetFullPath(Path.Combine(ModuleDirectory, "..", "..", "ThirdParty", "quickjs", "Lib"));
+        string LibraryPath = Path.GetFullPath(Path.Combine(ThirdPartyPath, "quickjs", "Lib"));
         if (Target.Platform == UnrealTargetPlatform.Win64)
         {
             string V8LibraryPath = Path.Combine(LibraryPath, "Win64MD");

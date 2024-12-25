@@ -6,7 +6,7 @@ using Puerts.TypeMapping;
 namespace Puerts.UnitTest
 {
     // xIl2cpp模式暂无法让每个JsEnv使用单独的DefaultBinding值
-#if !UNITY_WEBGL && !EXPERIMENTAL_IL2CPP_PUERTS
+#if !UNITY_WEBGL && !PUERTS_IL2CPP_OPTIMIZATION
     public class AccessControlHelper {
         public static string StaticField = "StaticField";
         public string InstanceField = "InstanceField";
@@ -55,6 +55,16 @@ namespace Puerts.UnitTest
             aach.InstanceMethod();
             System.Console.WriteLine("" + AccessControlHelper.StaticField + AnotherAccessControlHelper.StaticField + ach.InstanceField + aach.InstanceField);
         }
+        
+#if PUERTS_GENERAL
+        [OneTimeTearDown]
+        public void Cleanup()
+        {
+            //GC.Collect();
+            //GC.WaitForPendingFinalizers();
+            DefaultDontBindingEnv.Dispose();
+        }
+#endif
 
         [Test]
         public void AllMemberIsUndefinedInDefaultDontBindingEnv()
@@ -88,7 +98,7 @@ namespace Puerts.UnitTest
                     {
                         
                         { "StaticMethod_static", new MemberRegisterInfo { Name = "StaticMethod", IsStatic = true, MemberType = MemberType.Method, UseBindingMode = BindingMode.FastBinding
-        #if !EXPERIMENTAL_IL2CPP_PUERTS
+        #if !PUERTS_IL2CPP_OPTIMIZATION
                         , Method = EmptyCallbackWrap
         #endif  
                         } },
@@ -115,7 +125,7 @@ namespace Puerts.UnitTest
                     {
                         
                         {"StaticMethod_static", new MemberRegisterInfo { Name = "StaticMethod", IsStatic = true, MemberType = MemberType.Method, UseBindingMode = BindingMode.DontBinding
-        #if !EXPERIMENTAL_IL2CPP_PUERTS
+        #if !PUERTS_IL2CPP_OPTIMIZATION
                         , Method = EmptyCallbackWrap
         #endif
                         }},

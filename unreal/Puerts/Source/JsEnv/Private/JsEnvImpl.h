@@ -28,20 +28,24 @@
 #include "UObject/WeakFieldPtr.h"
 #endif
 
+PRAGMA_DISABLE_UNDEFINED_IDENTIFIER_WARNINGS
 #pragma warning(push, 0)
 #include "libplatform/libplatform.h"
 #include "v8.h"
 #pragma warning(pop)
+PRAGMA_ENABLE_UNDEFINED_IDENTIFIER_WARNINGS
 
 #include "NamespaceDef.h"
 
 #include "V8InspectorImpl.h"
 
 #if defined(WITH_NODEJS)
+PRAGMA_DISABLE_UNDEFINED_IDENTIFIER_WARNINGS
 #pragma warning(push, 0)
 #include "node.h"
 #include "uv.h"
 #pragma warning(pop)
+PRAGMA_ENABLE_UNDEFINED_IDENTIFIER_WARNINGS
 #endif
 
 #if USE_WASM3
@@ -84,8 +88,7 @@ public:
 
     virtual ~FJsEnvImpl() override;
 
-    virtual void Start(
-        const FString& ModuleNameOrScript, const TArray<TPair<FString, UObject*>>& Arguments, bool IsScript) override;
+    virtual void Start(const FString& ModuleNameOrScript, const TArray<TPair<FString, UObject*>>& Arguments) override;
 
     // 通知V8目前空闲，在截止时间之前可以进行GC
     virtual bool IdleNotificationDeadline(double DeadlineInSeconds) override;
@@ -139,7 +142,7 @@ public:
 
     virtual void ReloadModule(FName ModuleName, const FString& JsSource) override;
 
-    virtual void ReloadSource(const FString& Path, const std::string& JsSource) override;
+    virtual void ReloadSource(const FString& Path, const PString& JsSource) override;
 
     std::function<void(const FString&)> OnSourceLoadedCallback;
 
@@ -181,6 +184,8 @@ public:
 	
     bool IsTypeScriptGeneratedClass(UClass* Class);
 
+    void SetJsTakeRef(UObject* UEObject, FClassWrapper* ClassWrapper);
+
     virtual void Bind(FClassWrapper* ClassWrapper, UObject* UEObject, v8::Local<v8::Object> JSObject) override;
 
     virtual void UnBind(UClass* Class, UObject* UEObject) override;
@@ -198,13 +203,19 @@ public:
 
     virtual void UnBindStruct(FScriptStructWrapper* ScriptStructWrapper, void* Ptr) override;
 
-    virtual void UnBindCppObject(JSClassDefinition* ClassDefinition, void* Ptr) override;
+    virtual void UnBindCppObject(v8::Isolate* Isolate, JSClassDefinition* ClassDefinition, void* Ptr) override;
 
     virtual v8::Local<v8::Value> FindOrAddStruct(
         v8::Isolate* Isolate, v8::Local<v8::Context>& Context, UScriptStruct* ScriptStruct, void* Ptr, bool PassByPointer) override;
 
     virtual void BindCppObject(v8::Isolate* InIsolate, JSClassDefinition* ClassDefinition, void* Ptr,
         v8::Local<v8::Object> JSObject, bool PassByPointer) override;
+
+    virtual void* GetPrivateData(v8::Local<v8::Context> Context, v8::Local<v8::Object> JSObject) override;
+
+    virtual void SetPrivateData(v8::Local<v8::Context> Context, v8::Local<v8::Object> JSObject, void* Ptr) override;
+
+    virtual v8::MaybeLocal<v8::Function> LoadTypeById(v8::Local<v8::Context> Context, const void* TypeId) override;
 
     virtual v8::Local<v8::Value> FindOrAddCppObject(
         v8::Isolate* Isolate, v8::Local<v8::Context>& Context, const void* TypeId, void* Ptr, bool PassByPointer) override;
@@ -332,6 +343,8 @@ private:
 
     void UEClassToJSClass(const v8::FunctionCallbackInfo<v8::Value>& Info);
 
+    void SetJsTakeRefInTs(const v8::FunctionCallbackInfo<v8::Value>& Info);
+
     bool GetContainerTypeProperty(v8::Local<v8::Context> Context, v8::Local<v8::Value> Value, PropertyMacro** PropertyPtr);
 
     void NewContainer(const v8::FunctionCallbackInfo<v8::Value>& Info);
@@ -414,8 +427,11 @@ private:
 
     std::unordered_multimap<int, FModuleInfo*>::iterator FindModuleInfo(v8::Local<v8::Module> Module);
 
-    static v8::MaybeLocal<v8::Module> ResolveModuleCallback(
-        v8::Local<v8::Context> Context, v8::Local<v8::String> Specifier, v8::Local<v8::Module> Referrer);
+    static v8::MaybeLocal<v8::Module> ResolveModuleCallback(v8::Local<v8::Context> Context, v8::Local<v8::String> Specifier,
+#if V8_MAJOR_VERSION >= 9
+        v8::Local<v8::FixedArray> ImportAttributes,    // not implement yet
+#endif
+        v8::Local<v8::Module> Referrer);
 #endif
 
     struct ObjectMerger;
@@ -424,7 +440,7 @@ private:
 
     struct ObjectMerger
     {
-        std::map<std::string, std::unique_ptr<FPropertyTranslator>> Fields;
+        std::map<PString, std::unique_ptr<FPropertyTranslator>> Fields;
         UStruct* Struct;
         FJsEnvImpl* Parent;
 
@@ -619,6 +635,10 @@ private:
 
     v8::Global<v8::Function> GenListApply;
 
+#if defined(WITH_V8_BYTECODE)
+    v8::Global<v8::Function> GenEmptyCode;
+#endif
+
     TMap<UStruct*, FTemplateInfo> TypeToTemplateInfoMap;
 
     TMap<FString, std::shared_ptr<FStructWrapper>> TypeReflectionMap;
@@ -761,7 +781,8 @@ private:
         v8::Global<v8::Function> Callback;
         FUETickDelegateHandle TickerHandle;
     };
-    TSparseArray<FTimerInfo> TimerInfos;
+    uint32_t TimerID = 0;
+    TMap<uint32_t, FTimerInfo> TimerInfos;
 
 	TMap<int, int> TimerIncreaseHandleToHandles;
 
@@ -815,6 +836,12 @@ private:
                 .Check();
         }
     };
+#if defined(WITH_V8_BYTECODE)
+    uint32_t Expect_FlagHash = 0;
+#if V8_MAJOR_VERSION >= 11
+    uint32_t Expect_ReadOnlySnapshotChecksum = 0;
+#endif
+#endif
 };
 
 }    // namespace PUERTS_NAMESPACE

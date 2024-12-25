@@ -5,7 +5,7 @@
 * This file is subject to the terms and conditions defined in file 'LICENSE', which is part of this source code package.
 */
 
-#if !EXPERIMENTAL_IL2CPP_PUERTS || !ENABLE_IL2CPP
+#if !PUERTS_IL2CPP_OPTIMIZATION || !ENABLE_IL2CPP
 
 using System;
 using System.Collections.Generic;
@@ -95,7 +95,7 @@ namespace Puerts
             {
                 return (IntPtr isolate, IntPtr info, IntPtr self, int argumentsLen) =>
                 {
-                    var valuePtr = PuertsDLL.GetArgumentValue(info, 0);
+                    var valuePtr = PuertsDLL.GetArgumentValue(isolate, info, 0);
                     var valueType = PuertsDLL.GetJsValueType(isolate, valuePtr, false);                    
                     object value = null;
                     if (
@@ -125,7 +125,7 @@ namespace Puerts
             {
                 return (IntPtr isolate, IntPtr info, IntPtr self, int argumentsLen) =>
                 {
-                    var valuePtr = PuertsDLL.GetArgumentValue(info, 0);
+                    var valuePtr = PuertsDLL.GetArgumentValue(isolate, info, 0);
                     var valueType = PuertsDLL.GetJsValueType(isolate, valuePtr, false);
                     object value = null;
                     if (

@@ -56,7 +56,7 @@ bool UPEDirectoryWatcher::Watch(const FString& InDirectory)
                             continue;
                     }
                 }
-                if (!Added.IsEmpty() || !Modified.IsEmpty() || !Removed.IsEmpty())
+                if (Added.Num() || Modified.Num() || Removed.Num())
                 {
                     OnChanged.Broadcast(Added, Modified, Removed);
                 }

@@ -24,9 +24,9 @@ FJsEnv::FJsEnv(std::shared_ptr<IJSModuleLoader> InModuleLoader, std::shared_ptr<
         std::move(InModuleLoader), InLogger, InDebugPort, InOnSourceLoadedCallback, InFlags, InExternalRuntime, InExternalContext, IsEditorEnv);
 }
 
-void FJsEnv::Start(const FString& ModuleName, const TArray<TPair<FString, UObject*>>& Arguments, bool IsScript)
+void FJsEnv::Start(const FString& ModuleName, const TArray<TPair<FString, UObject*>>& Arguments)
 {
-    GameScript->Start(ModuleName, Arguments, IsScript);
+    GameScript->Start(ModuleName, Arguments);
 }
 
 bool FJsEnv::IdleNotificationDeadline(double DeadlineInSeconds)
@@ -118,7 +118,7 @@ void FJsEnv::ReloadModule(FName ModuleName, const FString& JsSource)
     GameScript->ReloadModule(ModuleName, JsSource);
 }
 
-void FJsEnv::ReloadSource(const FString& Path, const std::string& JsSource)
+void FJsEnv::ReloadSource(const FString& Path, const PString& JsSource)
 {
     GameScript->ReloadSource(Path, JsSource);
 }

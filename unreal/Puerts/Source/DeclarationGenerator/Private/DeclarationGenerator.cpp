@@ -29,11 +29,16 @@
 #include "Widgets/Notifications/SNotificationList.h"
 // #include "Misc/MessageDialog.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
+#if (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 5)
+#include "StructUtils/UserDefinedStruct.h"
+#else
 #include "Engine/UserDefinedStruct.h"
+#endif
 #include "Engine/UserDefinedEnum.h"
 #include "Engine/Blueprint.h"
 #include "CodeGenerator.h"
 #include "JSClassRegister.h"
+#include "UECompatible.h"
 #include "Engine/CollisionProfile.h"
 #if (ENGINE_MAJOR_VERSION >= 5)
 #include "ToolMenus.h"
@@ -582,7 +587,8 @@ void FTypeScriptDeclarationGenerator::NamespaceEnd(UObject* Obj, FStringBuffer& 
 void FTypeScriptDeclarationGenerator::WriteOutput(UObject* Obj, const FStringBuffer& Buff)
 {
     const UPackage* Pkg = GetPackage(Obj);
-    if (Pkg && !Obj->IsNative() && BlueprintTypeDeclInfoCache.Find(Pkg->GetFName()))
+    bool IsPluginBPClass = Pkg && !Obj->IsNative() && !Pkg->GetName().StartsWith(TEXT("/Game/"));
+    if (Pkg && !Obj->IsNative() && !IsPluginBPClass && BlueprintTypeDeclInfoCache.Find(Pkg->GetFName()))
     {
         FStringBuffer Temp;
         Temp.Prefix = Output.Prefix;
@@ -597,7 +603,7 @@ void FTypeScriptDeclarationGenerator::WriteOutput(UObject* Obj, const FStringBuf
         BlueprintTypeDeclInfoCache[Pkg->GetFName()].NameToDecl.Add(Obj->GetFName(), Temp.Buffer);
         BlueprintTypeDeclInfoCache[Pkg->GetFName()].IsExist = true;
     }
-    else if (Obj->IsNative())
+    else if (Obj->IsNative() || IsPluginBPClass)
     {
         NamespaceBegin(Obj, Output);
         Output << Buff;
@@ -692,6 +698,7 @@ void FTypeScriptDeclarationGenerator::LoadAllWidgetBlueprint(FName InSearchPath,
     	AssetRegistry.ScanPathsSynchronous(Paths);
         BPFilter.PackagePaths.Add(FName(TEXT("/ActCore")));
     }
+    BPFilter.PackagePaths.Add(FName(TEXT("/Engine")));
     BPFilter.bRecursivePaths = true;
     BPFilter.bRecursiveClasses = true;
 #if ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION > 0
@@ -1011,7 +1018,14 @@ bool FTypeScriptDeclarationGenerator::GenFunction(
             OwnerBuffer << "static ";
         }
 
-        OwnerBuffer << SafeFieldName(Function->GetName());
+        FString FuncName = Function->GetName();
+#ifdef PUERTS_WITH_EDITOR_SUFFIX
+        if (puerts::IsEditorOnlyUFunction(Function))
+        {
+            FuncName += EditorOnlyPropertySuffix;
+        }
+#endif
+        OwnerBuffer << SafeFieldName(FuncName);
     }
     OwnerBuffer << "(";
     PropertyMacro* ReturnValue = nullptr;
@@ -1197,7 +1211,10 @@ void FTypeScriptDeclarationGenerator::GatherExtensions(UStruct* Struct, FStringB
         while (PropertyInfo && PropertyInfo->Name && PropertyInfo->Type)
         {
             if (Struct->FindPropertyByName(UTF8_TO_TCHAR(PropertyInfo->Name)))
+            {
+                ++PropertyInfo;
                 continue;
+            }
             Buff << "    " << PropertyInfo->Name << ": " << GetNamePrefix(PropertyInfo->Type) << PropertyInfo->Type->Name()
                  << ";\n";
             ++PropertyInfo;
@@ -1377,7 +1394,14 @@ void FTypeScriptDeclarationGenerator::GenClass(UClass* Class)
 
         FStringBuffer TmpBuff;
     	AddAccessDesc(TmpBuff,Property);
-        TmpBuff << SafeFieldName(Property->GetName()) << ": ";
+        FString SN = Property->GetName();
+#ifdef PUERTS_WITH_EDITOR_SUFFIX
+        if (Property->IsEditorOnlyProperty())
+        {
+            SN += EditorOnlyPropertySuffix;
+        }
+#endif
+        TmpBuff << SafeFieldName(SN) << ": ";
         TArray<UObject*> RefTypesTmp;
         if (!GenTypeDecl(TmpBuff, Property, RefTypesTmp))
         {
@@ -1415,6 +1439,24 @@ void FTypeScriptDeclarationGenerator::GenClass(UClass* Class)
 			}
 		}
 	}
+
+    for (int i = 0; i < Class->Interfaces.Num(); i++)
+    {
+        for (TFieldIterator<UFunction> FunctionIt(Class->Interfaces[i].Class, EFieldIteratorFlags::IncludeSuper); FunctionIt;
+             ++FunctionIt)
+        {
+            FStringBuffer TmpBuff;
+            if (!GenFunction(TmpBuff, *FunctionIt))
+            {
+                continue;
+            }
+            if (FunctionIt->GetName().Contains("ExecuteUbergraph"))
+            {
+                continue;
+            }
+            TryToAddOverload(Outputs, FunctionIt->GetName(), (FunctionIt->FunctionFlags & FUNC_Static) != 0, TmpBuff.Buffer);
+        }
+    }
 
     GatherExtensions(Class, StringBuffer);
 
@@ -1505,7 +1547,6 @@ void FTypeScriptDeclarationGenerator::GenEnum(UEnum* Enum)
 
 void FTypeScriptDeclarationGenerator::GenStruct(UStruct* Struct)
 {
-#include "ExcludeStructs.h"
     FStringBuffer StringBuffer{"", ""};
     const FString SafeStructName =
         Struct->IsNative() ? SafeName(Struct->GetName()) : PUERTS_NAMESPACE::FilenameToTypeScriptVariableName(Struct->GetName());
@@ -1535,6 +1576,31 @@ void FTypeScriptDeclarationGenerator::GenStruct(UStruct* Struct)
 
     auto GenConstrutor = [&]()
     {
+        auto ClassDefinition = PUERTS_NAMESPACE::FindClassByType(Struct);
+        if (ClassDefinition && ClassDefinition->ConstructorInfos)
+        {
+            PUERTS_NAMESPACE::NamedFunctionInfo* ConstructorInfo = ClassDefinition->ConstructorInfos;
+            while (ConstructorInfo && ConstructorInfo->Name && ConstructorInfo->Type)
+            {
+                FStringBuffer Tmp;
+                Tmp << "constructor(";
+                GenArgumentsForFunctionInfo(ConstructorInfo->Type, Tmp);
+                Tmp << ")";
+                StringBuffer << "    " << Tmp.Buffer << ";\n";
+                for (unsigned int i = 0; i < ConstructorInfo->Type->ArgumentCount(); i++)
+                {
+                    auto argInfo = ConstructorInfo->Type->Argument(i);
+                    if (argInfo->IsUEType())
+                    {
+                        UScriptStruct* UsedStruct = PUERTS_NAMESPACE::FindAnyType<UScriptStruct>(UTF8_TO_TCHAR(argInfo->Name()));
+                        if (UsedStruct)
+                            Gen(UsedStruct);
+                    }
+                }
+                ++ConstructorInfo;
+            }
+            return;
+        }
         FStringBuffer TmpBuff;
         TmpBuff << "constructor(";
         bool First = true;

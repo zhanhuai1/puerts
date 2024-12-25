@@ -6,12 +6,11 @@
 */
 
 #pragma once
-#pragma warning(push, 0)
-#include "v8.h"
-#pragma warning(pop)
 
 #include <map>
 #include <algorithm>
+#include <unordered_map>
+#include "Common.h"
 #include "Log.h"
 #include "V8InspectorImpl.h"
 #if WITH_QUICKJS
@@ -27,21 +26,22 @@
 
 #endif
 
-namespace puerts
+#define EXECUTEMODULEGLOBANAME "__puertsExecuteModule"
+
+namespace PUERTS_NAMESPACE
 {
-    class BackendEnv 
+    class FBackendEnv 
     {
-    private:
+    public:
         v8::Isolate* MainIsolate;
 
         v8::Global<v8::Context> MainContext;
 
-    public:
-        ~BackendEnv() {
+        ~FBackendEnv() {
             PathToModuleMap.clear();
             ScriptIdToPathMap.clear();
         }
-        BackendEnv()
+        FBackendEnv()
         {
             Inspector = nullptr;
         } 
@@ -49,6 +49,10 @@ namespace puerts
         v8::Isolate::CreateParams* CreateParams;
 
         void LogicTick();
+        
+        void StartPolling();
+        
+        void StopPolling();
 
 #if defined(WITH_NODEJS)
         uv_loop_t NodeUVLoop;
@@ -76,8 +80,6 @@ namespace puerts
         int Epoll;
 #endif
 
-        void StartPolling();
-
         void UvRunOnce();
 
         void PollEvents();
@@ -85,16 +87,42 @@ namespace puerts
         static void OnWatcherQueueChanged(uv_loop_t* loop);
 
         void WakeupPollingThread();
-
-        void StopPolling();
-
 #endif
 
         // Module
 #if defined(WITH_QUICKJS)
         std::map<std::string, JSModuleDef*> PathToModuleMap;
+        JSValue JsFileLoader;
+        JSValue JsFileNormalize;
+        
+        JSModuleDef* LoadModule(JSContext* ctx, const char *name);
+        
+        char* ResolveQjsModule(JSContext *ctx, const char *base_name, const char *name, bool throwIfFail);
+        
+        char* NormalizeModuleName(JSContext *ctx, const char *base_name, const char *name);
 #else
         std::map<std::string, v8::UniquePersistent<v8::Module>> PathToModuleMap;
+        struct FModuleInfo
+        {
+            v8::Global<v8::Module> Module;
+            std::map<std::string, v8::Global<v8::Module>> ResolveCache;
+        };
+        std::unordered_multimap<int, FModuleInfo*> ScriptIdToModuleInfo;
+        
+        
+        v8::MaybeLocal<v8::Value> ResolvePath(v8::Isolate* Isolate, v8::Local<v8::Context> Context, v8::Local<v8::Value> Specifier, v8::Local<v8::Value> ReferrerName);
+        
+        v8::MaybeLocal<v8::Value> ReadFile( v8::Isolate* Isolate, v8::Local<v8::Context> Context, v8::Local<v8::Value> URL, std::string &pathForDebug);
+        
+        v8::MaybeLocal<v8::Module> FetchModuleTree(v8::Isolate* isolate, v8::Local<v8::Context> context, v8::Local<v8::String> absolute_file_path);
+        
+        std::unordered_multimap<int, FBackendEnv::FModuleInfo*>::iterator FindModuleInfo(v8::Local<v8::Module> Module);
+        
+        static v8::MaybeLocal<v8::Module> ResolveModuleCallback(v8::Local<v8::Context> context, v8::Local<v8::String> specifier,
+#if V8_94_OR_NEWER
+            v8::Local<v8::FixedArray> import_attributes,    // not implement yet
+#endif
+            v8::Local<v8::Module> referrer);
 #endif
         std::map<int, std::string> ScriptIdToPathMap;
 
@@ -104,17 +132,15 @@ namespace puerts
         // Inspector
         V8Inspector* Inspector;
 
-        V8_INLINE static BackendEnv* Get(v8::Isolate* Isolate)
+        V8_INLINE static FBackendEnv* Get(v8::Isolate* Isolate)
         {
-            return (BackendEnv*)Isolate->GetData(1);
+            return (FBackendEnv*)Isolate->GetData(1);
         }
         static void GlobalPrepare();
 
-        v8::Isolate* CreateIsolate(void* external_quickjs_runtime);
+        void Initialize(void* external_quickjs_runtime, void* external_quickjs_context);
 
-        void FreeIsolate();
-
-        void InitInject(v8::Isolate* Isolate, v8::Local<v8::Context> Context);
+        void UnInitialize();
         
         void CreateInspector(v8::Isolate* Isolate, const v8::Global<v8::Context>* ContextGlobal, int32_t Port);
 
@@ -123,6 +149,11 @@ namespace puerts
         bool InspectorTick();
 
         bool ClearModuleCache(v8::Isolate* Isolate, v8::Local<v8::Context> Context, const char* Path);
+
+        std::string GetJSStackTrace();
+#if !defined(WITH_QUICKJS)
+        v8::Local<v8::Object> GetV8Extras(v8::Isolate* isolate, v8::Local<v8::Context> context);
+#endif
     };
 
 #if WITH_NODEJS
@@ -134,27 +165,24 @@ namespace puerts
 
     namespace esmodule 
     {
-        void ExecuteModule(const v8::FunctionCallbackInfo<v8::Value>& info);
-
 #if !WITH_QUICKJS
-        v8::MaybeLocal<v8::Module> _ResolveModule(
-            v8::Local<v8::Context> Context,
-            v8::Local<v8::String> Specifier,
-            v8::Local<v8::Value> Referrer,
-            bool& isFromCache
-        );
 
-        v8::MaybeLocal<v8::Module> ResolveModule( v8::Local<v8::Context> Context, v8::Local<v8::String> Specifier, v8::Local<v8::Module> Referrer);
-
-        bool LinkModule(v8::Local<v8::Context> Context, v8::Local<v8::Module> RefModule);
-
-        v8::MaybeLocal<v8::Promise> DynamicImport(v8::Local<v8::Context> Context, v8::Local<v8::ScriptOrModule> Referrer, v8::Local<v8::String> Specifier); 
+#if V8_MAJOR_VERSION >= 10
+        v8::MaybeLocal<v8::Promise> HostImportModuleDynamically(v8::Local<v8::Context> Context, v8::Local<v8::Data> HostDefinedOptions,
+            v8::Local<v8::Value> ResourceName, v8::Local<v8::String> Specifier, v8::Local<v8::FixedArray> ImportAssertions);
+#else
+        v8::MaybeLocal<v8::Promise> HostImportModuleDynamically(v8::Local<v8::Context> Context, v8::Local<v8::ScriptOrModule> Referrer, v8::Local<v8::String> Specifier); 
+#endif
 
         void HostInitializeImportMetaObject(v8::Local<v8::Context> Context, v8::Local<v8::Module> Module, v8::Local<v8::Object> meta);
+        
+        void ExecuteModule(const v8::FunctionCallbackInfo<v8::Value>& info);
 #else 
         JSModuleDef* js_module_loader(JSContext* ctx, const char *name, void *opaque);
-
-        char* js_module_resolver(JSContext *ctx, const char *base_name, const char *name, void* opaque);
+    
+        char* module_normalize(JSContext *ctx, const char *base_name, const char *name, void* opaque);
+    
+        JSValue ExecuteModule(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv, int magic, JSValue *func_data);
 #endif
     }
 }

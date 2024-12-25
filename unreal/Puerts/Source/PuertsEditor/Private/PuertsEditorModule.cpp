@@ -29,6 +29,7 @@
 #include "CookOnTheSide/CookOnTheFlyServer.h"
 #include "Editor/UnrealEdEngine.h"
 #include "Kismet/KismetSystemLibrary.h"
+#include "PString.h"
 
 class UEditorJSHelper;
 
@@ -255,7 +256,7 @@ void FPuertsEditorModule::OnPostEngineInit()
                     TArray<uint8> Source;
                     if (FFileHelper::LoadFileToArray(Source, *InPath))
                     {
-                        CodeAnalyzeEnv->ReloadSource(InPath, std::string((const char*) Source.GetData(), Source.Num()));
+                        JsEnv->ReloadSource(InPath, puerts::PString((const char*) Source.GetData(), Source.Num()));
                     }
                     else
                     {

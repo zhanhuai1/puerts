@@ -11,7 +11,7 @@
 #include <stdarg.h>
 #include "ExecuteModuleJSCode.h"
 
-namespace puerts
+namespace PUERTS_NAMESPACE
 {
     static void JSObjectValueGetterFunction(const v8::FunctionCallbackInfo<v8::Value>& Info)
     {
@@ -60,7 +60,11 @@ namespace puerts
 
         v8::Local<v8::String> Source = Info[0]->ToString(Context).ToLocalChecked();
         v8::Local<v8::String> Name = Info[1]->ToString(Context).ToLocalChecked();
+#if defined(V8_94_OR_NEWER) && !defined(WITH_QUICKJS)
+        v8::ScriptOrigin Origin(Isolate, Name);
+#else
         v8::ScriptOrigin Origin(Name);
+#endif
         auto Script = v8::Script::Compile(Context, Source, &Origin);
         if (Script.IsEmpty())
         {
@@ -87,29 +91,25 @@ namespace puerts
         LastExceptionInfo = FV8Utils::ExceptionToString(MainIsolate, Exception);
     }
 
+#ifdef MULT_BACKENDS
+    JSEngine::JSEngine(puerts::IPuertsPlugin* InPuertsPlugin, void* external_quickjs_runtime, void* external_quickjs_context)
+#else
     JSEngine::JSEngine(void* external_quickjs_runtime, void* external_quickjs_context)
+#endif
     {
         GeneralDestructor = nullptr;
-        BackendEnv::GlobalPrepare();
+        FBackendEnv::GlobalPrepare();
 
-        std::string Flags = "--no-harmony-top-level-await --stack_size=856";
-#if PUERTS_DEBUG
-        Flags += " --expose-gc";
-#if PLATFORM_MAC
-        Flags += " --jitless --no-expose-wasm";
-#endif
-#endif
-#if PLATFORM_IOS
-        Flags += " --jitless --no-expose-wasm";
-#endif
-        v8::V8::SetFlagsFromString(Flags.c_str(), static_cast<int>(Flags.size()));
-
-        MainIsolate = BackendEnv.CreateIsolate(external_quickjs_runtime);
+        BackendEnv.Initialize(external_quickjs_runtime, external_quickjs_context);
+        MainIsolate = BackendEnv.MainIsolate;
 
         auto Isolate = MainIsolate;
-        ResultInfo.Isolate = MainIsolate;
-        MainIsolate->SetData(0, this);
-        MainIsolate->SetData(1, &BackendEnv);
+#ifdef MULT_BACKENDS
+        ResultInfo.PuertsPlugin = InPuertsPlugin;
+#endif
+        ResultInfo.Isolate = Isolate;
+        Isolate->SetData(0, this);
+        Isolate->SetData(1, &BackendEnv);
 
 #ifdef THREAD_SAFE
         v8::Locker Locker(Isolate);
@@ -117,17 +117,12 @@ namespace puerts
         v8::Isolate::Scope Isolatescope(Isolate);
         v8::HandleScope HandleScope(Isolate);
 
-#if WITH_QUICKJS
-        v8::Local<v8::Context> Context = (external_quickjs_runtime && external_quickjs_context) ? v8::Context::New(Isolate, external_quickjs_context) : v8::Context::New(Isolate);
-#else
-        v8::Local<v8::Context> Context = v8::Context::New(Isolate);
-#endif
+        v8::Local<v8::Context> Context = BackendEnv.MainContext.Get(Isolate);
         v8::Context::Scope ContextScope(Context);
         ResultInfo.Context.Reset(Isolate, Context);
         v8::Local<v8::Object> Global = Context->Global();
         if (external_quickjs_runtime == nullptr) 
         {
-            BackendEnv.InitInject(MainIsolate, Context);
             Global->Set(Context, FV8Utils::V8String(Isolate, "__puertsGetLastException"), v8::FunctionTemplate::New(Isolate, &GetLastException)->GetFunction(Context).ToLocalChecked()).Check();
         }
         Global->Set(Context, FV8Utils::V8String(Isolate, "__tgjsEvalScript"), v8::FunctionTemplate::New(Isolate, &EvalWithPath)->GetFunction(Context).ToLocalChecked()).Check();
@@ -135,17 +130,22 @@ namespace puerts
         JSObjectIdMap.Reset(Isolate, v8::Map::New(Isolate));
 
         JSObjectValueGetter = CreateJSFunction(
-            MainIsolate, Context, 
+            Isolate, Context, 
             v8::FunctionTemplate::New(Isolate, &JSObjectValueGetterFunction)->GetFunction(Context).ToLocalChecked()
         );
+        
+#ifdef WITH_IL2CPP_OPTIMIZATION
+        CppObjectMapper.Initialize(Isolate, Context);
+        Isolate->SetData(MAPPER_ISOLATE_DATA_POS, static_cast<ICppObjectMapper*>(&CppObjectMapper));
+#endif
+
+        BackendEnv.StartPolling();
     }
 
     JSEngine::~JSEngine()
     {
-#if WITH_NODEJS
         LogicTick();
         BackendEnv.StopPolling();
-#endif
         DestroyInspector();
 
         JSObjectIdMap.Reset();
@@ -207,11 +207,19 @@ namespace puerts
         ResultInfo.Context.Reset();
         ResultInfo.Result.Reset();
 
-        BackendEnv.FreeIsolate();
+#ifdef WITH_IL2CPP_OPTIMIZATION
+        CppObjectMapper.UnInitialize(MainIsolate);
+#endif
+        BackendEnv.UnInitialize();
 
         for (int i = 0; i < CallbackInfos.size(); ++i)
         {
             delete CallbackInfos[i];
+        }
+        
+        for (int i = 0; i < CallbackWithFinalizeInfos.size(); ++i)
+        {
+            delete CallbackWithFinalizeInfos[i];
         }
 
         for (int i = 0; i < LifeCycleInfos.size(); ++i)
@@ -227,14 +235,23 @@ namespace puerts
             bool success = Eval(ExecuteModuleJSCode, "__puer_execute__.mjs");
             if (!success) return nullptr;
             
+#ifdef THREAD_SAFE
+            v8::Locker Locker(MainIsolate);
+#endif
             v8::Isolate::Scope IsolateScope(MainIsolate);
             v8::HandleScope HandleScope(MainIsolate);
             v8::Local<v8::Context> Context = ResultInfo.Context.Get(MainIsolate);
             v8::Context::Scope ContextScope(Context);
-            ModuleExecutor = CreateJSFunction(
-                MainIsolate, Context, 
-                v8::FunctionTemplate::New(MainIsolate, puerts::esmodule::ExecuteModule)->GetFunction(Context).ToLocalChecked()
-            );
+            v8::Local<v8::Object> Global = Context->Global();
+            auto Ret = Global->Get(Context, v8::String::NewFromUtf8(MainIsolate, EXECUTEMODULEGLOBANAME).ToLocalChecked());
+            v8::Local<v8::Value> Func;
+            if (Ret.ToLocal(&Func) && Func->IsFunction())
+            {
+                ModuleExecutor = CreateJSFunction(
+                    MainIsolate, Context, 
+                    Func.As<v8::Function>()
+                );
+            }
         }
         return ModuleExecutor;
     }
@@ -252,7 +269,11 @@ namespace puerts
 
         v8::Local<v8::String> Url = FV8Utils::V8String(Isolate, Path == nullptr ? "" : Path);
         v8::Local<v8::String> Source = FV8Utils::V8String(Isolate, Code);
+#if defined(V8_94_OR_NEWER) && !defined(WITH_QUICKJS)
+        v8::ScriptOrigin Origin(Isolate, Url);
+#else
         v8::ScriptOrigin Origin(Url);
+#endif
         v8::TryCatch TryCatch(Isolate);
 
         auto CompiledScript = v8::Script::Compile(Context, Source, &Origin);
@@ -366,13 +387,21 @@ namespace puerts
         JSFunction* Function = nullptr;
         for (int i = 0; i < JSFunctions.size(); i++) {
             if (!JSFunctions[i]) {
+#ifdef MULT_BACKENDS
+                Function = new JSFunction(ResultInfo.PuertsPlugin, InIsolate, InContext, InFunction, i);
+#else
                 Function = new JSFunction(InIsolate, InContext, InFunction, i);
+#endif
                 JSFunctions[i] = Function;
                 break;
             }
         }
         if (!Function) {
+#ifdef MULT_BACKENDS
+            Function = new JSFunction(ResultInfo.PuertsPlugin, InIsolate, InContext, InFunction, static_cast<int32_t>(JSFunctions.size()));
+#else
             Function = new JSFunction(InIsolate, InContext, InFunction, static_cast<int32_t>(JSFunctions.size()));
+#endif
             JSFunctions.push_back(Function);
         }
         InFunction->Set(InContext, FV8Utils::V8String(InIsolate, FUNCTION_INDEX_KEY), v8::Integer::New(InIsolate, Function->Index));
@@ -394,7 +423,12 @@ namespace puerts
 
         void* Ptr = CallbackInfo->IsStatic ? nullptr : FV8Utils::GetPoninter(Info.Holder());
 
+#ifdef MULT_BACKENDS
+        auto JsEngine = FV8Utils::IsolateData<JSEngine>(Isolate);
+        CallbackInfo->Callback(JsEngine->ResultInfo.PuertsPlugin, Info, Ptr, Info.Length(), CallbackInfo->Data);
+#else
         CallbackInfo->Callback(Isolate, Info, Ptr, Info.Length(), CallbackInfo->Data);
+#endif
     }
 
     v8::Local<v8::FunctionTemplate> JSEngine::ToTemplate(v8::Isolate* Isolate, bool IsStatic, CSharpFunctionCallback Callback, int64_t Data)
@@ -402,7 +436,65 @@ namespace puerts
         auto Pos = CallbackInfos.size();
         auto CallbackInfo = new FCallbackInfo(IsStatic, Callback, Data);
         CallbackInfos.push_back(CallbackInfo);
+#if defined(WITH_QUICKJS)
         return v8::FunctionTemplate::New(Isolate, CSharpFunctionCallbackWrap, v8::External::New(Isolate, CallbackInfos[Pos]));
+#else
+        return v8::FunctionTemplate::New(Isolate, CSharpFunctionCallbackWrap, v8::External::New(Isolate, CallbackInfos[Pos]),  v8::Local<v8::Signature>(), 0,  v8::ConstructorBehavior::kThrow);
+#endif
+    }
+    
+    void JSEngine::CallbackDataGarbageCollected(const v8::WeakCallbackInfo<FCallbackInfoWithFinalize>& Data)
+    {
+        FCallbackInfoWithFinalize* CallbackData = Data.GetParameter();
+        auto Isolate = Data.GetIsolate();
+        if (CallbackData->Finalize)
+        {
+#ifdef MULT_BACKENDS
+            auto JsEngine = FV8Utils::IsolateData<JSEngine>(Isolate);
+            CallbackData->Finalize(JsEngine->ResultInfo.PuertsPlugin, CallbackData->Data);
+#else
+            CallbackData->Finalize(Isolate, CallbackData->Data);
+#endif
+        }
+        for (auto it = CallbackData->JSE->CallbackWithFinalizeInfos.begin(); it != CallbackData->JSE->CallbackWithFinalizeInfos.end(); )
+        {
+            if (*it == CallbackData)
+            {
+                it = CallbackData->JSE->CallbackWithFinalizeInfos.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+        delete CallbackData;
+    }
+    
+    v8::MaybeLocal<v8::Function> JSEngine::CreateFunction(CSharpFunctionCallback Callback, JsFunctionFinalizeCallback Finalize, int64_t Data)
+    {
+        v8::Isolate* Isolate = BackendEnv.MainIsolate;
+        v8::Local<v8::Context> Context = Isolate->GetCurrentContext();
+        auto CallbackData = new FCallbackInfoWithFinalize(false, Callback, Data, Finalize, this);
+
+#if defined(WITH_QUICKJS)
+        auto Template = v8::FunctionTemplate::New(Isolate, CSharpFunctionCallbackWrap, v8::External::New(Isolate, CallbackData));
+#else
+        auto Template = v8::FunctionTemplate::New(Isolate, CSharpFunctionCallbackWrap, v8::External::New(Isolate, CallbackData),  v8::Local<v8::Signature>(), 0,  v8::ConstructorBehavior::kThrow);
+        Template->Set(Isolate, "__do_not_cache", v8::ObjectTemplate::New(Isolate));
+#endif
+        auto Ret = Template->GetFunction(Context);
+        if (!Ret.IsEmpty())
+        {
+            CallbackData->JsFunction.Reset(Isolate, Ret.ToLocalChecked());
+            CallbackData->JsFunction.SetWeak<FCallbackInfoWithFinalize>(
+                CallbackData, CallbackDataGarbageCollected, v8::WeakCallbackType::kInternalFields);
+            CallbackWithFinalizeInfos.push_back(CallbackData);
+        }
+        else
+        {
+            delete CallbackData;
+        }
+        return Ret;
     }
 
     void JSEngine::SetGlobalFunction(const char *Name, CSharpFunctionCallback Callback, int64_t Data)
@@ -424,6 +516,7 @@ namespace puerts
     static void NewWrap(const v8::FunctionCallbackInfo<v8::Value>& Info)
     {
         v8::Isolate* Isolate = Info.GetIsolate();
+        auto JsEngine = FV8Utils::IsolateData<JSEngine>(Isolate);
 #ifdef THREAD_SAFE
         v8::Locker Locker(Isolate);
 #endif
@@ -444,9 +537,13 @@ namespace puerts
             }
             else // Call by js new
             {
+#ifdef MULT_BACKENDS
+                if (LifeCycleInfo->Constructor) Ptr = LifeCycleInfo->Constructor(JsEngine->ResultInfo.PuertsPlugin, Info, Info.Length(), LifeCycleInfo->Data);
+#else
                 if (LifeCycleInfo->Constructor) Ptr = LifeCycleInfo->Constructor(Isolate, Info, Info.Length(), LifeCycleInfo->Data);
+#endif
             }
-            FV8Utils::IsolateData<JSEngine>(Isolate)->BindObject(LifeCycleInfo, Ptr, Self);
+            JsEngine->BindObject(LifeCycleInfo, Ptr, Self);
         }
         else
         {
@@ -511,7 +608,7 @@ namespace puerts
         v8::Local<v8::Context> Context = ResultInfo.Context.Get(Isolate);
         v8::Context::Scope ContextScope(Context);
 
-        if (ClassID >= Templates.size()) return false;
+        if (ClassID >= Templates.size() || !Callback) return false;
 
         if (IsStatic)
         {
@@ -560,14 +657,15 @@ namespace puerts
 
         if (IsStatic)
         {
-            Templates[ClassID].Get(Isolate)->SetAccessorProperty(FV8Utils::V8String(Isolate, Name), ToTemplate(Isolate, IsStatic, Getter, GetterData)
-                , Setter == nullptr ? v8::Local<v8::FunctionTemplate>() : ToTemplate(Isolate, IsStatic, Setter, SetterData), Attr);
+            Templates[ClassID].Get(Isolate)->SetAccessorProperty(FV8Utils::V8String(Isolate, Name), 
+                Getter == nullptr ? v8::Local<v8::FunctionTemplate>() : ToTemplate(Isolate, IsStatic, Getter, GetterData), 
+                Setter == nullptr ? v8::Local<v8::FunctionTemplate>() : ToTemplate(Isolate, IsStatic, Setter, SetterData), Attr);
         }
         else
         {
             Templates[ClassID].Get(Isolate)->PrototypeTemplate()->SetAccessorProperty(FV8Utils::V8String(Isolate, Name),
-                ToTemplate(Isolate, IsStatic, Getter, GetterData)
-                , Setter == nullptr ? v8::Local<v8::FunctionTemplate>() : ToTemplate(Isolate, IsStatic, Setter, SetterData), Attr);
+                Getter == nullptr ? v8::Local<v8::FunctionTemplate>() : ToTemplate(Isolate, IsStatic, Getter, GetterData),
+                Setter == nullptr ? v8::Local<v8::FunctionTemplate>() : ToTemplate(Isolate, IsStatic, Setter, SetterData), Attr);
         }
 
         return true;
@@ -697,6 +795,9 @@ namespace puerts
     
     bool JSEngine::ClearModuleCache(const char* Path)
     {
+#ifdef THREAD_SAFE
+        v8::Locker Locker(MainIsolate);
+#endif
         v8::Isolate::Scope IsolateScope(MainIsolate);
         v8::HandleScope HandleScope(MainIsolate);
         v8::Local<v8::Context> Context = ResultInfo.Context.Get(MainIsolate);
@@ -704,4 +805,9 @@ namespace puerts
 
         return BackendEnv.ClearModuleCache(MainIsolate, Context, Path);
     }
+
+    std::string JSEngine::GetJSStackTrace()
+	{
+        return BackendEnv.GetJSStackTrace();
+	}
 }

@@ -13,6 +13,7 @@ namespace Puerts.UnitTest
 
         }
 
+        [UnityEngine.Scripting.Preserve]
         public bool IsESM(string filepath)
         {
             return !filepath.EndsWith(".cjs");
@@ -57,12 +58,18 @@ namespace Puerts.UnitTest
         [UnityEngine.Scripting.Preserve]
         public bool FileExists(string specifier)
         {
+            if (nullFiles.Contains(specifier)) return true;
             return !System.String.IsNullOrEmpty(Resolve(specifier, "."));
         }
 
         [UnityEngine.Scripting.Preserve]
         public string ReadFile(string specifier, out string debugpath)
         {
+            if (nullFiles.Contains(specifier))
+            {
+                debugpath = string.Empty;
+                return null;
+            }
             debugpath = "";
             if (specifier != null) {
                 if (specifier.StartsWith(UnityEngine.Application.streamingAssetsPath) || File.Exists(UnityEngine.Application.streamingAssetsPath + "/" + specifier)) {
@@ -94,6 +101,13 @@ namespace Puerts.UnitTest
         {
             mockFileContent[fileName] = content;
         }
+        
+        private HashSet<string> nullFiles = new HashSet<string>();
+        [UnityEngine.Scripting.Preserve]
+        public void AddNullFile(string fileName)
+        {
+            nullFiles.Add(fileName);
+        }
     }
     public class UnitTestLoader : ILoader
     {
@@ -111,6 +125,7 @@ namespace Puerts.UnitTest
         [UnityEngine.Scripting.Preserve]
         public bool FileExists(string specifier)
         {
+            if (nullFiles.Contains(specifier)) return true;
             string path = UnityEngine.Application.streamingAssetsPath + "/" + specifier;
             if (System.IO.File.Exists(path))
             {
@@ -130,6 +145,11 @@ namespace Puerts.UnitTest
         [UnityEngine.Scripting.Preserve]
         public string ReadFile(string specifier, out string debugpath)
         {
+            if (nullFiles.Contains(specifier))
+            {
+                debugpath = string.Empty;
+                return null;
+            }
             debugpath = "";
             if (specifier != null) {
                 if (specifier.StartsWith(UnityEngine.Application.streamingAssetsPath) || File.Exists(UnityEngine.Application.streamingAssetsPath + "/" + specifier)) {
@@ -148,6 +168,13 @@ namespace Puerts.UnitTest
         public void AddMockFileContent(string fileName, string content)
         {
             mockFileContent[fileName] = content;
+        }
+        
+        private HashSet<string> nullFiles = new HashSet<string>();
+        [UnityEngine.Scripting.Preserve]
+        public void AddNullFile(string fileName)
+        {
+            nullFiles.Add(fileName);
         }
     }
 }

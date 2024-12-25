@@ -6,6 +6,50 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 
 you can get the english version change log at [Github Release](https://github.com/Tencent/puerts/releases)
 
+## [2.1.1] - 2024-10-25
+1. 鸿蒙平台禁用jit
+2. 高版本v8兼容
+3. 升级quickjs到最新版本
+4. v8 backend，quickjs添加websocket支持
+5. 添加支持模块lazyload和自动卸载的cjs实现。
+6. 解决plugin定义THREAD_SAFE宏，v8加锁不全的问题
+7. 添加ns（Nintendo Switch）的编译支持
+8. 解决clearmodulecache的内存泄露
+9. android下默认使用剪裁版本
+
+## [2.1.0] - 2024-06-25
+1. 功能：支持JsEnv参数指定Backend是V8还是quickjs；
+2. 修复：C#中执行ExecuteModule时如果被加载模块有语法错误Unity会崩溃
+3. 功能：让puer.getLastException可以拿到ExecuteModule的错误 (#1686)
+4. 优化：重构quickjs的esm，实现同一个函数中不会出现quickjs api和v8 api混用的情况，改进之前esm强依赖quickjs backend某版本实现导致quickjs backend无法升级情况。并升级quickjs backend。
+5. 修复：linux下nodejs后端找不到符号的问题
+6. 修复：加载空module文件失败的问题，fix #1700
+7. 优化：修正值类型参数的gc问题，fix #1527
+8. 修复：解决quickjs版本的String leaks
+9. 功能：鸿蒙系统编译支持
+10. 修复：Encoding.UTF8.GetBytes返回byte是不加0结尾的，需要手动加，否则AOT下会崩溃，fix #1691
+11. 功能：编辑器下创建GenericDelegate时记录js堆栈，在CheckLiveness失败时附带堆栈方便定位 (#1704) 
+12. 功能：debug 构建时默认开启调试器支持 (#1707)
+13. 功能：新增v8 10.6.194的支持
+14. 修复：避免FunctionTemplate同key的属性， fix #1714
+15. 优化：console.log在非unity环境应该通过Console.Error输出
+16. 优化：重构v8 esm实现，支持top-level-await
+17. 功能：添加v8.getHeapStatistics，v8.getHeapSpaceStatistics
+18. 优化：不允许对静态函数执行new操作符
+19. 修复：支持Explicit Interface Implementation，fix #1741
+20. 修复：quickjs后端js throw null/unfined会导致崩溃，fix #1747
+21. 优化：$Ref<T>中去掉value字段，fix #1752
+22. 优化：调试CtxGroupID每次递增（之前固定一个ID可能多JsEnv，单JsEnv多inspector可能有问题）
+
+## [2.0.5] - 2024-05-07
+1. 修复: 添加几个zombieyang/puerts_unity_webgl_demo#53用到的api
+
+## [2.0.4] - 2024-01-09
+1. 修复：调用extension方法并且方法带out或者ref参数会报错
+2. 修复：将JSObject赋值为null会报错
+3. 修复：调用带默认参数的extension函数时index读取不正确的bug
+4. 修复：xil2cpp下，值类型无参构造字段为随机值的问题
+
 ## [2.0.3] - 2023-11-02
 1. 重要：遵循Assetstore策略，生成菜单由PuerTS改到了Tools/PuerTS内
 2. 功能：支持dynamic import（即`import()`）#1540

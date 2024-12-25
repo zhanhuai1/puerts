@@ -9,6 +9,8 @@
 
 #include <string>
 
+typedef void(*LogCallback)(const char* value);
+
 namespace puerts
 {
 enum LogLevel

@@ -5,7 +5,7 @@
 * This file is subject to the terms and conditions defined in file 'LICENSE', which is part of this source code package.
 */
 
-#if !EXPERIMENTAL_IL2CPP_PUERTS || !ENABLE_IL2CPP
+#if !PUERTS_IL2CPP_OPTIMIZATION || !ENABLE_IL2CPP
 
 using System;
 using System.Collections.Generic;
@@ -84,7 +84,7 @@ namespace Puerts
         {
             if (obj != null)
             {
-                var gd = new GenericDelegate(IntPtr.Zero, null);
+                var gd = new GenericDelegate(IntPtr.Zero, null, null);
                 gd.Action();
                 gd.Action(obj);
                 gd.Action(obj, obj);
@@ -113,7 +113,13 @@ namespace Puerts
             {
                 return maybeOne.Target as GenericDelegate;
             }
-            GenericDelegate genericDelegate = new GenericDelegate(ptr, jsEnv);
+
+            string stacktrace = null;
+#if UNITY_EDITOR || DEBUG
+            //stacktrace = jsEnv.Eval<string>("new Error().stack");
+            stacktrace = PuertsDLL.GetJSStackTrace(jsEnv.isolate);
+#endif
+            GenericDelegate genericDelegate = new GenericDelegate(ptr, jsEnv, stacktrace);
             nativePtrToGenericDelegate[ptr] = new WeakReference(genericDelegate);
             return genericDelegate;
         }
@@ -199,7 +205,7 @@ namespace Puerts
 
                 if (genericDelegateCreator == null)
                 {
-#if UNITY_EDITOR && !EXPERIMENTAL_IL2CPP_PUERTS
+#if UNITY_EDITOR && !PUERTS_IL2CPP_OPTIMIZATION
                     if ((delegateMethod.ReturnType.IsValueType && delegateMethod.ReturnType != typeof(void))
                         || parameters.Length > 4
                         || typeArgs.Any(paramType => paramType.IsValueType || paramType.IsByRef)
@@ -331,17 +337,24 @@ namespace Puerts
         private Delegate firstValue = null;
         private Dictionary<Type, Delegate> bindTo = null;
 
+#if UNITY_EDITOR || DEBUG
+        private string stacktrace;
+#endif
+
         internal IntPtr getJsFuncPtr() 
         {
             return nativeJsFuncPtr;
         }
 
-        internal GenericDelegate(IntPtr nativeJsFuncPtr, JsEnv jsEnv)
+        internal GenericDelegate(IntPtr nativeJsFuncPtr, JsEnv jsEnv, string stacktrace)
         {
             this.nativeJsFuncPtr = nativeJsFuncPtr;
             jsEnv.IncFuncRef(nativeJsFuncPtr);
             isolate = jsEnv != null ? jsEnv.isolate : IntPtr.Zero;
             this.jsEnv = jsEnv;
+#if UNITY_EDITOR || DEBUG
+            this.stacktrace = stacktrace;
+#endif
         }
 
         internal void Close()
@@ -355,8 +368,12 @@ namespace Puerts
         {
             if (nativeJsFuncPtr == IntPtr.Zero)
             {
+#if UNITY_EDITOR || DEBUG
+                if (shouldThrow) throw new Exception("JsEnv has been disposed, stacktrace:" + (string.IsNullOrEmpty(this.stacktrace) ? "unknown" : this.stacktrace));
+#else
                 if (shouldThrow) throw new Exception("JsEnv has been disposed");
-            } 
+#endif
+            }
             else 
             {
                 jsEnv.CheckLiveness();
@@ -365,11 +382,14 @@ namespace Puerts
 
         ~GenericDelegate() 
         {
-            CheckLiveness(false);
+            if (nativeJsFuncPtr == IntPtr.Zero) return;
 #if THREAD_SAFE
             lock(jsEnv) {
 #endif
-            jsEnv.DecFuncRef(nativeJsFuncPtr);
+            if (jsEnv.CheckLiveness(false))
+            {
+                jsEnv.DecFuncRef(nativeJsFuncPtr);
+            }
 #if THREAD_SAFE
             }
 #endif

@@ -20,10 +20,6 @@
 
 `Puer003`和`Puer002`是类似的，只不过Puer003是Loader的ReadFile接口返回了空。你同时要检查一下为什么`FileExists`或`Resolve`返回了存在，但ReadFile时却读到了空
 
-#### [Puer W001] You are not using upm to install PuerTS or did not add 'PUERTS_CPP_OUTPUT_TO_NATIVE_SRC_UPM' definition.
-在使用xil2cpp模式时，PuerTS->Generate的产物需要经过plugin的重新编译才可用。因此Puer需要将Generate的产物塞回到plugin源码目录处。
-如果你没有采用[文档](./performance/il2cpp.md)建议的方式`git clone`并从package manager里添加PuerTS，外加添加了`PUERTS_CPP_OUTPUT_TO_NATIVE_SRC_UPM`宏，你需要自行将编译产物拿去进行plugin编译。
-
 ## 安装相关
 
 #### 版本中的 Stable/Latest，RC/Preview 分别意味着什么？
@@ -155,5 +151,6 @@ sm.install({
  * 在C#中加入THREAD_SAFE宏
  * 在plugins中加入THREAD_SAFE宏重新编译并替换各平台的plugins
 
-ps：以上是v8后端的的现象和解决方案，qjs后端如果多线程访问有可能会抛个没有文件信息的异常（<unknow>:-1）
+ps：以上是v8后端的的现象和解决方案，qjs后端如果多线程访问有可能会抛个没有文件信息的异常`<unknow>:-1`
+
 ps：如果是必报，应该是js代码中有递归死循环了。

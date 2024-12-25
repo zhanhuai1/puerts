@@ -58,6 +58,71 @@ namespace Puerts.UnitTest
             throw new Exception("unexpected to reach here");
         }
 #endif
+
+        /*[Test]
+        public void ESModuleCallExecuteModuleAndModuleThrow()
+        {
+            var loader = UnitTestEnv.GetLoader();
+            loader.AddMockFileContent("eval-error/module1.mjs", @"throw new Error('aa');");
+            //loader.AddMockFileContent("eval-error/main.mjs", @"CS.Puerts.UnitTest.UnitTestEnv.GetEnv().ExecuteModule('eval-error/module1.mjs');");
+            //loader.AddMockFileContent("eval-error/main.mjs", @"globalThis.__puertsExecuteModule('eval-error/module1.mjs');");
+            loader.AddMockFileContent("eval-error/main.mjs", @"require('eval-error/module1.mjs');");
+            var jsEnv = UnitTestEnv.GetEnv();
+            //jsEnv.ExecuteModule("eval-error/main.mjs");
+        }*/
+        
+        [Test]
+        public void ESModuleCompileErrorInNested() //https://github.com/Tencent/puerts/issues/1670
+        {
+            var loader = UnitTestEnv.GetLoader();
+            loader.AddMockFileContent("compile-error/AModule.mjs", @"import BModule from ""./BModule.mjs""
+
+class AModule
+{
+
+}
+
+console.log(`===AModule=====`);
+
+export default AModule;");
+            loader.AddMockFileContent("compile-error/BModule.mjs", @"import CrashTest from ""CrashTest.mjs""
+
+class BModule
+{
+
+}
+
+console.log(`===BModule=====`);
+
+export default BModule;");
+            loader.AddMockFileContent("compile-error/CrashTest.mjs", @"
+
+class CrashTest
+{
+    async doSomthine(content) {
+        let content = '123';        //这里声明的变量，和输入参数一样，语法错误导致，启动后Unity崩溃。
+        return content;
+    }
+}
+
+console.log(`======CrashTest======`)
+
+export default CrashTest;");
+            var jsEnv = UnitTestEnv.GetEnv();
+            for (int i = 0; i < 10; ++i)
+            {
+                try 
+                {
+                    jsEnv.ExecuteModule("compile-error/AModule.mjs");
+                } 
+                catch(Exception e) 
+                {
+                    continue;
+                }
+                throw new Exception("unexpected to reach here");
+            }
+        }
+        
         [Test]
         public void ESModuleEvaluateError()
         {
@@ -151,6 +216,43 @@ namespace Puerts.UnitTest
 
         //     Assert.AreEqual(str, "hello world");
         // }
+        
+        [Test]
+        public void ESModuleImportNullFile() //https://github.com/Tencent/puerts/issues/1670
+        {
+            var loader = UnitTestEnv.GetLoader();
+            loader.AddMockFileContent("compile-error/CModule.mjs", @"import BModule from ""./DModule.mjs""
+
+class CModule
+{
+
+}
+
+console.log(`===CModule=====`);
+
+export default CModule;");
+            loader.AddMockFileContent("compile-error/DModule.mjs", @"import NullTest from ""NullTest.mjs""
+
+class DModule
+{
+
+}
+
+console.log(`===DModule=====`);
+
+export default DModule;");
+            loader.AddNullFile("NullTest.mjs");
+            var jsEnv = UnitTestEnv.GetEnv();
+            try 
+            {
+                jsEnv.ExecuteModule("compile-error/CModule.mjs");
+            } 
+            catch(Exception e) 
+            {
+                return;
+            }
+            throw new Exception("unexpected to reach here");
+        }
         [Test]
         public void ESModuleImportRelative()
         {

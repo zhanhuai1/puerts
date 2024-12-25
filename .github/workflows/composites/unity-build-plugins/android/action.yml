@@ -11,27 +11,27 @@ inputs:
     options:
     - Release
     - Debug
+  websocket:
+    description: enable websocket
+    default: '0'
+  build_proj_dir:
+    description: 'build project dir'     
+    required: false
+    default: 'native_src'
   GITHUB_TOKEN:
     required:
 
 runs:
   using: "composite"
   steps:
-    - name: Install NDK
-      shell: bash
-      run: |
-        cd ~
-        rm -rf ~/android-ndk-r21b
-        wget -O NDK -q https://dl.google.com/android/repository/android-ndk-r21b-linux-x86_64.zip
-        sudo apt install unzip -y
-        unzip -q NDK
     - name: Build
       shell: bash
       run: |
         cd unity
         npm i
-        cd native_src
-        ANDROID_NDK=~/android-ndk-r21b node ../cli make --platform android --backend ${{ inputs.backend }} --config ${{ inputs.config }}
+        cd ${{ inputs.build_proj_dir }}
+        ANDROID_NDK=~/android-ndk-r21b node ../cli make --platform android --backend ${{ inputs.backend }} --config ${{ inputs.config }} --websocket ${{ inputs.websocket }}
+        rm -rf .backends/${{ inputs.backend }}
     - name: Upload
       uses: actions/upload-artifact@v3
       with:
