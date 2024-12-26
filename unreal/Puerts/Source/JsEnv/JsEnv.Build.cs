@@ -44,7 +44,7 @@ public class JsEnv : ModuleRules
 
     private bool FTextAsString = true;
     
-    private bool bEditorSuffix = true;
+    private bool bEditorSuffix = false;
 
     // v8 9.4+
     private bool SingleThreaded = false;

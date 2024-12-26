@@ -98,7 +98,7 @@ private:
 
     void OnBlueprintPreCompile(UBlueprint* Blueprint);
     
-    TSharedPtr<PUERTS_NAMESPACE::FJsEnv> CodeAnalyzeEnv;
+    TSharedPtr<PUERTS_NAMESPACE::FJsEnv> JsEnv;
 
     TSharedPtr<PUERTS_NAMESPACE::FSourceFileWatcher> SourceFileWatcher;
 
@@ -251,7 +251,7 @@ void FPuertsEditorModule::OnPostEngineInit()
         SourceFileWatcher = MakeShared<PUERTS_NAMESPACE::FSourceFileWatcher>(
             [this](const FString& InPath)
             {
-                if (CodeAnalyzeEnv.IsValid())
+                if (JsEnv.IsValid())
                 {
                     TArray<uint8> Source;
                     if (FFileHelper::LoadFileToArray(Source, *InPath))
@@ -264,7 +264,7 @@ void FPuertsEditorModule::OnPostEngineInit()
                     }
                 }
             });
-        CodeAnalyzeEnv = MakeShared<PUERTS_NAMESPACE::FJsEnv>(
+        JsEnv = MakeShared<PUERTS_NAMESPACE::FJsEnv>(
             std::make_shared<PUERTS_NAMESPACE::DefaultJSModuleLoader>(TEXT("JavaScript")),
             std::make_shared<PUERTS_NAMESPACE::FDefaultLogger>(), -1,
             [this](const FString& InPath)
@@ -276,7 +276,7 @@ void FPuertsEditorModule::OnPostEngineInit()
             },
             TEXT("--max-old-space-size=2048"), nullptr, nullptr, true);
 
-        CodeAnalyzeEnv->Start("PuertsEditor/CodeAnalyze");
+        JsEnv->Start("PuertsEditor/CodeAnalyze");
     }
 }
 
@@ -297,7 +297,7 @@ void FPuertsEditorModule::MakeEditorJsEnv()
                 TArray<uint8> Source;
                 if (FFileHelper::LoadFileToArray(Source, *InPath))
                 {
-                    EditorEnv->ReloadSource(InPath, std::string((const char*) Source.GetData(), Source.Num()));
+                    EditorEnv->ReloadSource(InPath, puerts::PString((const char*) Source.GetData(), Source.Num()));
                 }
                 else
                 {
@@ -525,9 +525,9 @@ DEFINE_FUNCTION(FPuertsEditorModule::EditorWidgetDestruct)
 void FPuertsEditorModule::ShutdownModule()
 {
     CmdImpl = nullptr;
-    if (CodeAnalyzeEnv.IsValid())
+    if (JsEnv.IsValid())
     {
-        CodeAnalyzeEnv.Reset();
+        JsEnv.Reset();
     }
     if (SourceFileWatcher.IsValid())
     {

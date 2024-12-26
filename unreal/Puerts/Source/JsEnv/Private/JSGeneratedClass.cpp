@@ -189,33 +189,26 @@ UFunction* UJSGeneratedClass::Mixin(v8::Isolate* Isolate, UClass* Class, UFuncti
 {
     bool Existed = Super->GetOuter() == Class;
 
-    if (!Existed)
+    if (Existed)
     {
-        UFunction* Tmp =
-            Cast<UFunction>(StaticDuplicateObject(Super, Class, Super->GetFName(), RF_AllFlags, UFunction::StaticClass()));
-        Tmp->SetSuperStruct(Super);
-        Tmp->Next = Class->Children;
-        Class->Children = Tmp;
-        Class->AddFunctionToFunctionMap(Tmp, Tmp->GetFName());
-        Tmp->SetFlags(Tmp->GetFlags() | RF_Transient);
-        Super = Tmp;
-    }
-    auto MaybeJSFunction = Cast<UJSGeneratedFunction>(Super);
-    if (!MaybeJSFunction)
-    {
-        MaybeJSFunction = UJSGeneratedFunction::GetJSGeneratedFunctionFromScript(Super);
-    }
-    if (MaybeJSFunction)
-    {
-        if (Warning)
+        auto MaybeJSFunction = Cast<UJSGeneratedFunction>(Super);
+        if (!MaybeJSFunction)
         {
-            UE_LOG(Puerts, Warning, TEXT("Try to mixin a function[%s:%s] already mixin by anthor vm"), *Class->GetName(),
-                *Super->GetName());
+            MaybeJSFunction = UJSGeneratedFunction::GetJSGeneratedFunctionFromScript(Super);
         }
-        return MaybeJSFunction;
+        if (MaybeJSFunction)
+        {
+            if (Warning)
+            {
+                UE_LOG(Puerts, Warning, TEXT("Try to mixin a function[%s:%s] already mixin by anthor vm"), *Class->GetName(),
+                    *Super->GetName());
+            }
+            return MaybeJSFunction;
+        }
     }
 
-    const FString FunctionName = *FString::Printf(TEXT("%s%s"), *Super->GetName(), TEXT(MIXIN_METHOD_SUFFIX));
+    const FString FunctionName =
+        Existed ? *FString::Printf(TEXT("%s%s"), *Super->GetName(), TEXT(MIXIN_METHOD_SUFFIX)) : Super->GetName();
 
     // "Failed to bind native" warning
     Class->AddNativeFunction(*FunctionName, &UJSGeneratedFunction::execCallMixin);
@@ -233,10 +226,19 @@ UFunction* UJSGeneratedClass::Mixin(v8::Isolate* Isolate, UClass* Class, UFuncti
         }
     }
 
-    Function->SetSuperStruct(Super->GetSuperStruct());
+    if (!Existed)
+    {
+        // UE_LOG(LogTemp, Error, TEXT("new function %s"), *FunctionName.ToString());
+        Function->SetSuperStruct(Super);
+    }
+    else
+    {
+        // UE_LOG(LogTemp, Error, TEXT("replace function %s"), *FunctionName.ToString());
+        Function->SetSuperStruct(Super->GetSuperStruct());
+    }
 
     Function->DynamicInvoker = DynamicInvoker;
-    Function->FunctionTranslator = std::make_unique<PUERTS_NAMESPACE::FFunctionTranslator>(Super, false);
+    Function->FunctionTranslator = std::make_unique<PUERTS_NAMESPACE::FFunctionTranslator>(Existed ? Super : Function, false);
     Function->TakeJsObjectRef = TakeJsObjectRef;
 
     Function->Next = Class->Children;
@@ -254,14 +256,16 @@ UFunction* UJSGeneratedClass::Mixin(v8::Isolate* Isolate, UClass* Class, UFuncti
         Function->AddToRoot();
     }
 
-    Function->Original = Super;
-    Function->OriginalFunc = Super->GetNativeFunc();
-    Function->OriginalFunctionFlags = Super->FunctionFlags;
-    Super->FunctionFlags |= FUNC_Native;    //让UE不走解析
-    Super->SetNativeFunc(&UJSGeneratedFunction::execCallMixin);
-    Class->AddNativeFunction(*Super->GetName(), &UJSGeneratedFunction::execCallMixin);
-    UJSGeneratedFunction::SetJSGeneratedFunctionToScript(Super, Function);
-
+    if (Existed)
+    {
+        Function->Original = Super;
+        Function->OriginalFunc = Super->GetNativeFunc();
+        Function->OriginalFunctionFlags = Super->FunctionFlags;
+        Super->FunctionFlags |= FUNC_Native;    //让UE不走解析
+        Super->SetNativeFunc(&UJSGeneratedFunction::execCallMixin);
+        Class->AddNativeFunction(*Super->GetName(), &UJSGeneratedFunction::execCallMixin);
+        UJSGeneratedFunction::SetJSGeneratedFunctionToScript(Super, Function);
+    }
     return Function;
 }
 

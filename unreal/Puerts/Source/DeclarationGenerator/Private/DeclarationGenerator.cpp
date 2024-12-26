@@ -371,7 +371,7 @@ void FTypeScriptDeclarationGenerator::GenTypeScriptDeclaration(bool InGenStruct,
     for (int i = 0; i < SortedClasses.Num(); ++i)
     {
         UObject* Class = SortedClasses[i];
-        checkfSlow(Class != nullptr, TEXT("Class name corruption!"));
+    	checkfSlow(Class != nullptr, TEXT("Class name corruption!"));
         const TArray<FString>& IgnoreClassListOnDTS = IPuertsModule::Get().GetIgnoreClassListOnDTS();
         if (IgnoreClassListOnDTS.Contains(Class->GetName()))
         {

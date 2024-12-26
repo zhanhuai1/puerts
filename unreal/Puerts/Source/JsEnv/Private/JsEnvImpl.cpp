@@ -4709,10 +4709,10 @@ void FJsEnvImpl::SetFTickerDelegate(const v8::FunctionCallbackInfo<v8::Value>& I
             Delay);
 
 	//因为ts侧返回的setInterval最小值是0,不了解的人使用时可能会直接if(IntervalHandle)来判断,导致存在误判,这里+1,ClearInterval时-1处理
-    Info.GetReturnValue().Set(IncreaseDelegateHandleId + 1);
+    Info.GetReturnValue().Set(DelegateHandleId);
 }
 
-bool FJsEnvImpl::TimerCallback(int DelegateHandleId, int IncreaseDelegateHandleId, bool Continue)
+bool FJsEnvImpl::TimerCallback(int DelegateHandleId, bool Continue)
 {
     v8::Isolate* Isolate = MainIsolate;
 #ifdef SINGLE_THREAD_VERIFY
@@ -4730,7 +4730,7 @@ bool FJsEnvImpl::TimerCallback(int DelegateHandleId, int IncreaseDelegateHandleI
     FTimerInfo* PTimeInfo = TimerInfos.Find(DelegateHandleId);
     if (!PTimeInfo)
     {
-        Logger->Warn(FString::Printf(TEXT("Try to callback a invalid timer: %d %d"), DelegateHandleId, IncreaseDelegateHandleId));
+        Logger->Warn(FString::Printf(TEXT("Try to callback a invalid timer: %d"), DelegateHandleId));
         return false;
     }
 
@@ -4751,13 +4751,13 @@ bool FJsEnvImpl::TimerCallback(int DelegateHandleId, int IncreaseDelegateHandleI
 
     if (!Continue && !ClearInCallback)
     {
-        RemoveFTickerDelegateHandle(IncreaseDelegateHandleId);
+        RemoveFTickerDelegateHandle(DelegateHandleId);
     }
 
     return Continue && !ClearInCallback;
 }
 
-void FJsEnvImpl::RemoveFTickerDelegateHandle(int IncreaseDelegateHandleId)
+void FJsEnvImpl::RemoveFTickerDelegateHandle(int DelegateHandleId)
 {
     if (!TimerInfos.Contains(DelegateHandleId))
     {
@@ -4967,7 +4967,7 @@ void FJsEnvImpl::Mixin(const v8::FunctionCallbackInfo<v8::Value>& Info)
         NoWarning = Info[4]->BooleanValue(Isolate);
     }
 
-    UClass* New = MixinInternal(To, MixinMethods, Inherit, TakeJsObjectRef, Isolate, Context);
+    UClass* New = MixinInternal(To, MixinMethods, Inherit, TakeJsObjectRef, Isolate, Context, NoWarning);
     for (auto& KV : TypeToTemplateInfoMap)
     {
         if (New != KV.Key && KV.Key->IsChildOf(New))
@@ -4978,7 +4978,7 @@ void FJsEnvImpl::Mixin(const v8::FunctionCallbackInfo<v8::Value>& Info)
     Info.GetReturnValue().Set(FindOrAdd(Isolate, Context, New->GetClass(), New));
 }
 
-UClass* FJsEnvImpl::MixinInternal(UClass* To, v8::Local<v8::Object>& MixinMethods, bool Inherit, bool TakeJsObjectRef, v8::Isolate* Isolate, v8::Local<v8::Context>& Context)
+UClass* FJsEnvImpl::MixinInternal(UClass* To, v8::Local<v8::Object>& MixinMethods, bool Inherit, bool TakeJsObjectRef, v8::Isolate* Isolate, v8::Local<v8::Context>& Context, bool NoWarning)
 {
 	// @waynnewu 从原版Puerts的Mixin拆分出来，目的是使得MixinFromNative使用同一套Mixin逻辑
 	UClass* New = To;
@@ -5006,10 +5006,10 @@ UClass* FJsEnvImpl::MixinInternal(UClass* To, v8::Local<v8::Object>& MixinMethod
         auto Key = Keys->Get(Context, i).ToLocalChecked();
         auto MethodName = FV8Utils::ToFName(Isolate, Key);
         auto Function = To->FindFunctionByName(MethodName);
-        if (Function)
+        if (Function) 
         {
             auto JsFunc = MixinMethods->Get(Context, Key).ToLocalChecked();
-            auto MixinedFunc = UJSGeneratedClass::Mixin(Isolate, New, Function, MixinInvoker, TakeJsObjectRef, true);
+            auto MixinedFunc = UJSGeneratedClass::Mixin(Isolate, New, Function, MixinInvoker, TakeJsObjectRef, !NoWarning);
             MixinFunctionMap.Emplace(
                 MixinedFunc, v8::UniquePersistent<v8::Function>(Isolate, v8::Local<v8::Function>::Cast(JsFunc)));
             ReplaceMethodNames.Add(MethodName);

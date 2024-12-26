@@ -378,9 +378,9 @@ private:
 
     void SetFTickerDelegate(const v8::FunctionCallbackInfo<v8::Value>& Info, bool Continue);
 
-    bool TimerCallback(int DelegateHandleId, int IncreaseDelegateHandleId, bool Continue);
+    bool TimerCallback(int DelegateHandleId, bool Continue);
 
-    void RemoveFTickerDelegateHandle(int IncreaseDelegateHandleId);
+    void RemoveFTickerDelegateHandle(int DelegateHandleId);
 
     void SetInterval(const v8::FunctionCallbackInfo<v8::Value>& Info);
 
@@ -402,7 +402,7 @@ private:
     TArray<TWeakObjectPtr<UClass>> MixinClasses;
     void Mixin(const v8::FunctionCallbackInfo<v8::Value>& Info);
 
-	UClass* MixinInternal(UClass* To, v8::Local<v8::Object>& MixinMethods, bool Inherit, bool TakeJsObjectRef, v8::Isolate* Isolate, v8::Local<v8::Context>& Context);
+	UClass* MixinInternal(UClass* To, v8::Local<v8::Object>& MixinMethods, bool Inherit, bool TakeJsObjectRef, v8::Isolate* Isolate, v8::Local<v8::Context>& Context, bool NoWarning);
 #endif
 
     void FindModule(const v8::FunctionCallbackInfo<v8::Value>& Info);
