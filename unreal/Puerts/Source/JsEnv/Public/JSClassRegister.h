@@ -36,6 +36,8 @@ PRAGMA_ENABLE_UNDEFINED_IDENTIFIER_WARNINGS
 static const FAnsiStringView EditorOnlyPropertySuffix = "_EditorOnly";
 #endif
 
+static const FAnsiStringView DeprecatedPropertySuffix = "_DEPRECATED";
+
 namespace PUERTS_NAMESPACE
 {
 class CFunctionInfo;

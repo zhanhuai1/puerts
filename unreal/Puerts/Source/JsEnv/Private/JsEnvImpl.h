@@ -385,11 +385,7 @@ private:
     void SetInterval(const v8::FunctionCallbackInfo<v8::Value>& Info);
 
     void ClearInterval(const v8::FunctionCallbackInfo<v8::Value>& Info);
-
-	int GetNextTimerIncreaseHandle(int HandleId);
-
-	int RemoveTimerIncreaseHandle(int IncreaseDelegateHandleId);
-
+	
     void MergeObject(const v8::FunctionCallbackInfo<v8::Value>& Info);
 
     void NewObjectByClass(const v8::FunctionCallbackInfo<v8::Value>& Info);

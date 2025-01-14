@@ -191,6 +191,10 @@ void FPropertyTranslator::SetAccessor(v8::Isolate* Isolate, v8::Local<v8::Functi
             PropertyName += EditorOnlyPropertySuffix;
         }
 #endif
+    	if (Property->PropertyFlags & CPF_Deprecated)
+    	{
+    		PropertyName += DeprecatedPropertySuffix;
+    	}
 
         Template->PrototypeTemplate()->SetAccessorProperty(
             FV8Utils::InternalString(Isolate, PropertyName), GetterTemplate, SetterTemplate, v8::DontDelete);

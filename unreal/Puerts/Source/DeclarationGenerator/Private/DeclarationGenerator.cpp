@@ -152,6 +152,7 @@ static FString SafeFieldName(const FString& Name, bool WithBracket = true)
     return IsInvalid ? (WithBracket ? ((TEXT("[\"") + Ret + TEXT("\"]"))) : ((TEXT("\"") + Ret + TEXT("\"")))) : Ret;
 }
 
+
 FStringBuffer& FStringBuffer::operator<<(const FString& InText)
 {
     this->Buffer += InText;
@@ -1401,6 +1402,9 @@ void FTypeScriptDeclarationGenerator::GenClass(UClass* Class)
             SN += EditorOnlyPropertySuffix;
         }
 #endif
+    	if (Property->PropertyFlags & CPF_Deprecated){
+    		SN += DeprecatedPropertySuffix;
+    	}
         TmpBuff << SafeFieldName(SN) << ": ";
         TArray<UObject*> RefTypesTmp;
         if (!GenTypeDecl(TmpBuff, Property, RefTypesTmp))
@@ -1424,21 +1428,6 @@ void FTypeScriptDeclarationGenerator::GenClass(UClass* Class)
         }
         TryToAddOverload(Outputs, FunctionIt->GetName(), (FunctionIt->FunctionFlags & FUNC_Static) != 0, TmpBuff.Buffer);
     }
-	for(const FImplementedInterface& TmpInterface:Class->Interfaces)
-	{
-		if(TmpInterface.Class != nullptr)
-		{
-			for (TFieldIterator<UFunction> FunctionIt(TmpInterface.Class, EFieldIteratorFlags::ExcludeSuper); FunctionIt; ++FunctionIt)
-			{
-				FStringBuffer TmpBuff;
-				if (!GenFunction(TmpBuff, *FunctionIt))
-				{
-					continue;
-				}
-				TryToAddOverload(Outputs, FunctionIt->GetName(), (FunctionIt->FunctionFlags & FUNC_Static) != 0, TmpBuff.Buffer);
-			}
-		}
-	}
 
     for (int i = 0; i < Class->Interfaces.Num(); i++)
     {
@@ -1650,6 +1639,9 @@ void FTypeScriptDeclarationGenerator::GenStruct(UStruct* Struct)
                                                                      Property->GetDisplayNameText().ToString()
 #endif
                                                                      : Property->GetName());
+    	if (Property->PropertyFlags & CPF_Deprecated){
+    		SN += DeprecatedPropertySuffix;
+    	}
         TmpBuff << SN << ": ";
         TArray<UObject*> RefTypesTmp;
         if (!GenTypeDecl(TmpBuff, Property, RefTypesTmp))

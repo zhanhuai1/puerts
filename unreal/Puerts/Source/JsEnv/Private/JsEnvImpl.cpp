@@ -4766,24 +4766,6 @@ void FJsEnvImpl::RemoveFTickerDelegateHandle(int DelegateHandleId)
     FUETicker::GetCoreTicker().RemoveTicker(TimerInfos[DelegateHandleId].TickerHandle);
     TimerInfos.Remove(DelegateHandleId);
 }
-
-int FJsEnvImpl::GetNextTimerIncreaseHandle(int HandleId)
-{
-	int IncreaseDelegateHandleId = CurTimerIncreaseHandle++;
-	TimerIncreaseHandleToHandles.Emplace(IncreaseDelegateHandleId, HandleId);
-	return IncreaseDelegateHandleId;
-}
-
-int FJsEnvImpl::RemoveTimerIncreaseHandle(int IncreaseDelegateHandleId)
-{
-	int HandleId = -1;
-	if (TimerIncreaseHandleToHandles.RemoveAndCopyValue(IncreaseDelegateHandleId, HandleId))
-	{
-		return HandleId;
-	}
-	return -1;
-}
-
 void FJsEnvImpl::ClearInterval(const v8::FunctionCallbackInfo<v8::Value>& Info)
 {
     v8::Isolate* Isolate = Info.GetIsolate();
@@ -4802,7 +4784,7 @@ void FJsEnvImpl::ClearInterval(const v8::FunctionCallbackInfo<v8::Value>& Info)
     else
     {
         CHECK_V8_ARGS(EArgInt32);
-        int HandleId = Info[0]->Int32Value(Context).ToChecked() - 1;
+        int HandleId = Info[0]->Int32Value(Context).ToChecked();
         RemoveFTickerDelegateHandle(HandleId);
     }
 }
